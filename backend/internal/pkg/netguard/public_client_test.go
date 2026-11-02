@@ -100,12 +100,17 @@ func TestPublicClientDirectAnonymousRedirectsAndReusesConnections(t *testing.T) 
 }
 
 func TestPublicClientStreamsAndCancelsBody(t *testing.T) {
+	finishHandler := make(chan struct{})
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "prefix")
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
+		// Keep the response open until the client observes cancellation. If the
+		// handler returns first, a clean EOF can race the canceled read.
+		<-finishHandler
 	}))
 	defer server.Close()
+	defer close(finishHandler)
 	client, _ := localPublicClient(t, server)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
