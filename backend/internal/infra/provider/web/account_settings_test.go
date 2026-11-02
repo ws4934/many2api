@@ -49,7 +49,7 @@ func TestWebAccountSettingsMatchCapturedProtocol(t *testing.T) {
 			if json.Unmarshal(body, &payload) != nil || payload["tosVersion"] != account.CurrentWebTermsVersion {
 				t.Errorf("product terms payload = %s", body)
 			}
-			if request.Header.Get("Content-Type") != "application/json" || request.Header.Get("x-statsig-id") == "" {
+			if request.Header.Get("Content-Type") != "application/json" || request.Header.Get("x-statsig-id") != "" {
 				t.Errorf("product terms headers = %#v", request.Header)
 			}
 			if request.Header.Get("Cookie") != "sso=test-sso; sso-rw=test-sso; cf_clearance=clear" || request.Header.Get("Sec-Ch-Ua") == "" {
@@ -61,12 +61,12 @@ func TestWebAccountSettingsMatchCapturedProtocol(t *testing.T) {
 			if json.Unmarshal(body, &payload) != nil || payload["birthDate"] != "2000-01-02T16:00:00.000Z" {
 				t.Errorf("birth payload = %s", body)
 			}
-			if request.Header.Get("x-statsig-id") == "" || request.Header.Get("Cookie") != "sso=test-sso; sso-rw=test-sso; cf_clearance=clear" {
+			if request.Header.Get("x-statsig-id") != "" || request.Header.Get("Cookie") != "sso=test-sso; sso-rw=test-sso; cf_clearance=clear" {
 				t.Errorf("birth headers = %#v", request.Header)
 			}
 		case "/auth_mgmt.AuthManagement/UpdateUserFeatureControls":
 			nsfwSeen.Store(true)
-			if !bytes.Equal(body, enableNSFWBody) || request.Header.Get("x-statsig-id") == "" || request.Header.Get("x-user-agent") != "" {
+			if !bytes.Equal(body, enableNSFWBody) || request.Header.Get("x-statsig-id") != "" || request.Header.Get("x-user-agent") != "" {
 				t.Errorf("nsfw body=%x headers=%#v", body, request.Header)
 			}
 		default:
@@ -83,8 +83,7 @@ func TestWebAccountSettingsMatchCapturedProtocol(t *testing.T) {
 	}
 	encryptedToken, _ := cipher.Encrypt("test-sso")
 	encryptedCookies, _ := cipher.Encrypt("cf_clearance=clear")
-	statsig := base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{'s'}, 70))
-	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: statsig}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	adapter.accountsBaseURL = server.URL
 	credential := account.Credential{
 		ID: 1, Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO,
@@ -148,8 +147,7 @@ func TestAcceptTermsRequiresBothUpstreamSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	encryptedToken, _ := cipher.Encrypt("test-sso")
-	statsig := base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{'s'}, 70))
-	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: statsig}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	adapter.accountsBaseURL = server.URL
 	err = adapter.AcceptTerms(context.Background(), account.Credential{
 		ID: 3, Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, EncryptedAccessToken: encryptedToken,
@@ -188,8 +186,7 @@ func TestWebAccountBirthDateMapsOnlyAlreadySetResponse(t *testing.T) {
 				t.Fatal(err)
 			}
 			encryptedToken, _ := cipher.Encrypt("test-sso")
-			statsig := base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{'s'}, 70))
-			adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: statsig}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+			adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 
 			err = adapter.SetBirthDate(context.Background(), account.Credential{
 				ID: 4, Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, EncryptedAccessToken: encryptedToken,
@@ -219,8 +216,7 @@ func TestWebAccountSettingsRejectsBodyTrailerFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	encryptedToken, _ := cipher.Encrypt("test-sso")
-	statsig := base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{'s'}, 70))
-	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: statsig}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 
 	err = adapter.EnableNSFW(context.Background(), account.Credential{
 		ID: 3, Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, EncryptedAccessToken: encryptedToken,

@@ -19,7 +19,6 @@ const (
 	startupRecoveryBudget      = 20 * time.Second
 	startupCriticalWindow      = 2 * time.Minute
 	startupCriticalLimit       = 100
-	statsigWarmupInterval      = 15 * time.Minute
 	webQuotaStaleAfter         = 30 * time.Minute
 	webQuotaCatchupEvery       = 30 * time.Minute
 	consoleUsageMigrationEvery = 24 * time.Hour
@@ -38,7 +37,6 @@ type startupReport struct {
 	CooldownsRestored        int
 	QuotaRecoveriesRestored  int
 	DueWebQuotasQueued       int
-	StatsigKeysWarmed        int
 	StaleWebQuotasFound      int
 	StaleWebQuotasSynced     int
 	StaleModelCatalogsFound  int
@@ -51,7 +49,6 @@ type startupState struct {
 	phase     string
 	updatedAt time.Time
 	report    startupReport
-	statsig   httpserver.ReadinessComponent
 }
 
 func newStartupState(restoredQuotaRecoveries int) *startupState {
@@ -63,7 +60,6 @@ func newStartupState(restoredQuotaRecoveries int) *startupState {
 			StartedAt:               now,
 			QuotaRecoveriesRestored: restoredQuotaRecoveries,
 		},
-		statsig: httpserver.ReadinessComponent{State: "cold"},
 	}
 }
 
@@ -94,20 +90,10 @@ func (s *startupState) recordError(err error) {
 	})
 }
 
-func (s *startupState) setStatsig(state, detail string, warmed int) {
-	s.mu.Lock()
-	s.statsig = httpserver.ReadinessComponent{State: state, Detail: detail}
-	if warmed > 0 {
-		s.report.StatsigKeysWarmed = warmed
-	}
-	s.updatedAt = time.Now().UTC()
-	s.mu.Unlock()
-}
-
-func (s *startupState) snapshot() (string, time.Time, startupReport, httpserver.ReadinessComponent) {
+func (s *startupState) snapshot() (string, time.Time, startupReport) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.phase, s.updatedAt, s.report, s.statsig
+	return s.phase, s.updatedAt, s.report
 }
 
 func (s *startupState) acceptsTraffic() bool {
@@ -125,7 +111,7 @@ func readinessSnapshot(
 	providers *provider.Registry,
 	ledger *auditapp.Service,
 ) httpserver.ReadinessSnapshot {
-	phase, updatedAt, report, statsig := state.snapshot()
+	phase, updatedAt, report := state.snapshot()
 	snapshot := httpserver.ReadinessSnapshot{
 		Ready: false, State: phase, UpdatedAt: updatedAt, Startup: newReadinessStartupReport(report),
 		Components: map[string]httpserver.ReadinessComponent{
@@ -133,7 +119,6 @@ func readinessSnapshot(
 			"billing_ledger": {State: "unknown"},
 			"grok_build":     {State: "unknown"},
 			"grok_web":       {State: "unknown"},
-			"statsig":        statsig,
 		},
 	}
 	if phase != "running" {
@@ -245,17 +230,6 @@ func readinessSnapshot(
 		}
 		snapshot.Components[name] = httpserver.ReadinessComponent{State: "unavailable", Detail: detail}
 	}
-	if required[accountdomain.ProviderWeb] && usable[accountdomain.ProviderWeb] && statsig.State != "warm" {
-		component := snapshot.Components[string(accountdomain.ProviderWeb)]
-		if statsig.State == "warming" || statsig.State == "cold" {
-			component.State = "warming"
-		} else {
-			component.State = "degraded"
-		}
-		component.Detail = "Statsig 尚未完成预热；请求仍可按需刷新"
-		snapshot.Components[string(accountdomain.ProviderWeb)] = component
-		unavailableProviders++
-	}
 	if readyProviders == 0 {
 		snapshot.State = "not_ready"
 		return snapshot
@@ -283,7 +257,6 @@ func newReadinessStartupReport(report startupReport) *httpserver.ReadinessStartu
 		CooldownsRestored:        report.CooldownsRestored,
 		QuotaRecoveriesRestored:  report.QuotaRecoveriesRestored,
 		DueWebQuotasQueued:       report.DueWebQuotasQueued,
-		StatsigKeysWarmed:        report.StatsigKeysWarmed,
 		StaleWebQuotasFound:      report.StaleWebQuotasFound,
 		StaleWebQuotasSynced:     report.StaleWebQuotasSynced,
 		StaleModelCatalogsFound:  report.StaleModelCatalogsFound,
@@ -385,36 +358,6 @@ func (a *Application) reconcileStartup(ctx context.Context) {
 	}
 	a.startup.setPhase("running")
 	a.logger.Info("startup_reconciliation_completed", "credentials_backfilled", report.SchedulesBackfilled, "critical_found", report.CriticalFound, "credentials_refreshed", report.Refreshed, "credentials_failed", report.Failed)
-}
-
-func (a *Application) runStatsigWarmup(ctx context.Context) {
-	timer := time.NewTimer(0)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-		}
-		a.startup.setStatsig("warming", "正在预热共享签名", 0)
-		values, err := a.accountRepo.ListEnabled(ctx, accountdomain.ProviderWeb)
-		if err == nil && len(values) == 0 {
-			a.startup.setStatsig("disabled", "没有启用的 Grok Web 账号", 0)
-		} else if err == nil {
-			warmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			var warmed int
-			warmed, err = a.web.WarmStatsig(warmCtx, values[0])
-			cancel()
-			if err == nil {
-				a.startup.setStatsig("warm", "共享签名已预热", warmed)
-			}
-		}
-		if err != nil && ctx.Err() == nil {
-			a.logger.Warn("web_statsig_warmup_failed", "error", err)
-			a.startup.setStatsig("unavailable", "预热失败，将由请求按需重试", 0)
-		}
-		resetTimer(timer, statsigWarmupInterval)
-	}
 }
 
 func (a *Application) queueDueWebQuotaRefresh(ctx context.Context) {

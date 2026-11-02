@@ -398,7 +398,7 @@ func TestChatImageUploadFeedsFileMetadataIntoConversation(t *testing.T) {
 			_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "conv_1"}}})
 			var item map[string]any
 			if err := connection.ReadJSON(&item); err != nil {
-				t.Errorf("read conversation.item.create: %v", err)
+				t.Errorf("read atomic response.create: %v", err)
 				return
 			}
 			itemEvent := item["event"].(map[string]any)
@@ -406,9 +406,8 @@ func TestChatImageUploadFeedsFileMetadataIntoConversation(t *testing.T) {
 			if len(attachments) != 1 || attachments[0] != "file_meta_1" {
 				t.Errorf("file_attachment_ids = %#v", itemEvent["file_attachment_ids"])
 			}
-			var create map[string]any
-			if err := connection.ReadJSON(&create); err != nil || create["event"].(map[string]any)["type"] != "response.create" {
-				t.Errorf("read response.create: value=%#v err=%v", create, err)
+			if itemEvent["type"] != "response.create" || itemEvent["item"] == nil {
+				t.Errorf("expected atomic response.create: %#v", itemEvent)
 				return
 			}
 			_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "response.chunk", "chunk": map[string]any{"text": map[string]any{"text": "seen", "channel": "CHANNEL_ASSISTANT_RESPONSE"}}}})
@@ -478,15 +477,14 @@ func TestForwardMessagesWebSearchEndToEnd(t *testing.T) {
 				_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "conv_1"}}})
 				var item map[string]any
 				if err := connection.ReadJSON(&item); err != nil {
-					t.Errorf("read conversation.item.create: %v", err)
+					t.Errorf("read atomic response.create: %v", err)
 					return
 				}
 				itemValue := item["event"].(map[string]any)["item"].(map[string]any)
 				chunks := itemValue["x_grok"].(map[string]any)["input_chunks"].([]any)
 				upstreamMessage, _ = chunks[len(chunks)-1].(map[string]any)["text"].(map[string]any)["text"].(string)
-				var create map[string]any
-				if err := connection.ReadJSON(&create); err != nil {
-					t.Errorf("read response.create: %v", err)
+				if item["event"].(map[string]any)["type"] != "response.create" {
+					t.Errorf("expected atomic response.create: %#v", item)
 					return
 				}
 				_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "response.search.result", "result": map[string]any{"url": "https://doc.rust-lang.org", "title": "The Rust Book"}}})
@@ -503,7 +501,7 @@ func TestForwardMessagesWebSearchEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual"}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+			adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 			body, _ := json.Marshal(map[string]any{
 				"model": "public", "max_tokens": 256, "stream": streaming,
 				"messages":    []any{map[string]any{"role": "user", "content": "Perform a web search for the query: rust tutorials"}},
@@ -593,7 +591,7 @@ func TestOpenChatScopesStreamIdleTimeoutToTextStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", ChatTimeoutSeconds: 5, StreamIdleTimeoutSeconds: 1,
+		BaseURL: server.URL, ChatTimeoutSeconds: 5, StreamIdleTimeoutSeconds: 1,
 	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	credential := account.Credential{ID: 1, Provider: account.ProviderWeb, UserID: "497f19f8-49d4-458a-bee4-43ec3dcaf8ca", EncryptedAccessToken: encrypted}
 	spec, ok := Resolve("grok-chat-fast")
@@ -643,7 +641,7 @@ func TestWebNonStreamingResponseStillProtectsGatewayStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", ChatTimeoutSeconds: 5, StreamIdleTimeoutSeconds: 1,
+		BaseURL: server.URL, ChatTimeoutSeconds: 5, StreamIdleTimeoutSeconds: 1,
 	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	body := []byte(`{"model":"grok-chat-fast","input":"hello","stream":false}`)
 	_, err = adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
@@ -713,12 +711,10 @@ func TestLiteChatStreamFailsBeforeReturningSuccessResponse(t *testing.T) {
 		initialID := initial["event"].(map[string]any)["event_id"].(string)
 		_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "session.created", "client_event_id": initialID}})
 		_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "conv_1"}}})
-		for range 2 {
-			var event map[string]any
-			if err := connection.ReadJSON(&event); err != nil {
-				t.Errorf("read turn event: %v", err)
-				return
-			}
+		var event map[string]any
+		if err := connection.ReadJSON(&event); err != nil || event["event"].(map[string]any)["type"] != "response.create" {
+			t.Errorf("read atomic response.create: value=%#v err=%v", event, err)
+			return
 		}
 		_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "response.done", "response": map[string]any{"id": "parent_1", "status": "completed"}}})
 	}))
@@ -732,7 +728,7 @@ func TestLiteChatStreamFailsBeforeReturningSuccessResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual"}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, imageAssetStoreStub{})
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, imageAssetStoreStub{})
 	response, err := adapter.ForwardResponse(context.Background(), provider.ResponseResourceRequest{
 		Credential: account.Credential{ID: 1, Provider: account.ProviderWeb, UserID: "497f19f8-49d4-458a-bee4-43ec3dcaf8ca", EncryptedAccessToken: encrypted},
 		Method:     http.MethodPost, Path: "/v1/chat/completions", Model: "grok-imagine-image", Operation: conversation.OperationChat,
@@ -1593,100 +1589,6 @@ func TestTextToVideoPayloadMatchesCapturedMediaGenInputShape(t *testing.T) {
 	}
 }
 
-func TestGenerateVideoRefreshesOnlyReloadStatsigForbidden(t *testing.T) {
-	tests := []struct {
-		name             string
-		forbiddenBody    string
-		wantRequestCalls int
-		wantSuccess      bool
-	}{
-		{
-			name:             "page out of date",
-			forbiddenBody:    `{"code":7,"message":"This page is out of date. Reload to continue.","details":[]}`,
-			wantRequestCalls: 2,
-			wantSuccess:      true,
-		},
-		{
-			name:             "content moderation",
-			forbiddenBody:    `{"error":{"code":"content-moderated","message":"rejected"}}`,
-			wantRequestCalls: 1,
-		},
-		{
-			name:             "definitive account block",
-			forbiddenBody:    `{"code":7,"message":"User is blocked [WKE=unauthorized:blocked-user]","details":[]}`,
-			wantRequestCalls: 1,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			requestCalls := 0
-			signerCalls := 0
-			signatures := make([]string, 0, 2)
-			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-				switch request.URL.Path {
-				case "/sign":
-					signerCalls++
-					value := base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{byte('a' + signerCalls)}, 70))
-					writer.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(writer).Encode(map[string]string{"x-statsig-id": value})
-				case "/rest/app-chat/conversations/new":
-					requestCalls++
-					signatures = append(signatures, request.Header.Get("x-statsig-id"))
-					if requestCalls == 1 {
-						writer.Header().Set("Content-Type", "application/json")
-						writer.WriteHeader(http.StatusForbidden)
-						_, _ = io.WriteString(writer, test.forbiddenBody)
-						return
-					}
-					writer.Header().Set("Content-Type", "text/event-stream")
-					_, _ = io.WriteString(writer, `data: {"result":{"response":{"streamingVideoGenerationResponse":{"progress":100,"videoPostId":"post_1","videoUrl":"/videos/final.mp4"}}}}`+"\n\n")
-				default:
-					http.NotFound(writer, request)
-				}
-			}))
-			defer server.Close()
-
-			cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			encryptedToken, err := cipher.Encrypt("test-sso")
-			if err != nil {
-				t.Fatal(err)
-			}
-			adapter := NewAdapter(Config{
-				BaseURL: server.URL, StatsigMode: "url", StatsigSignerURL: server.URL + "/sign", VideoTimeoutSeconds: 5,
-			}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
-			adapter.statsig.fetchMeta = func(context.Context, string, string, *infraegress.Lease) (string, error) {
-				return "current-page-meta", nil
-			}
-			adapter.statsig.validateEndpoint = func(context.Context, string) error { return nil }
-			adapter.videoNow = sequentialVideoTestClock()
-
-			result, err := adapter.GenerateVideo(context.Background(), provider.VideoRequest{
-				Credential: account.Credential{ID: 1, Provider: account.ProviderWeb, EncryptedAccessToken: encryptedToken},
-				Prompt:     "test", Duration: 5,
-			})
-			if test.wantSuccess {
-				if err != nil || result.URL != "https://assets.grok.com/videos/final.mp4" {
-					t.Fatalf("result=%#v err=%v", result, err)
-				}
-			} else if err == nil {
-				t.Fatal("structured policy rejection unexpectedly succeeded")
-			}
-			if requestCalls != test.wantRequestCalls || signerCalls != test.wantRequestCalls {
-				t.Fatalf("request calls=%d signer calls=%d, want %d", requestCalls, signerCalls, test.wantRequestCalls)
-			}
-			if len(signatures) != test.wantRequestCalls || signatures[0] == "" {
-				t.Fatalf("signatures = %#v", signatures)
-			}
-			if test.wantRequestCalls == 2 && signatures[0] == signatures[1] {
-				t.Fatalf("rejected Statsig signature was reused: %#v", signatures)
-			}
-		})
-	}
-}
-
 func TestParseVideoStreamPreservesUpstreamStatus(t *testing.T) {
 	response := &http.Response{StatusCode: http.StatusTooManyRequests, Body: io.NopCloser(strings.NewReader("limited"))}
 	_, _, err := parseVideoStream(response, nil)
@@ -1734,7 +1636,7 @@ func TestGenerateVideoClassifiesOnlyExplicitHTTPRejectionAsCreateFailure(t *test
 		t.Fatal(err)
 	}
 	manager := infraegress.NewManager(egressRepositoryStub{}, cipher)
-	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test"}, manager, cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, manager, cipher, nil, nil)
 	request := provider.VideoRequest{
 		Credential: account.Credential{ID: 1, Provider: account.ProviderWeb, EncryptedAccessToken: encryptedToken},
 		Prompt:     "test",
@@ -1897,8 +1799,10 @@ func TestWebStreamErrorsPenalizeEgressOnlyOnReadFailure(t *testing.T) {
 					initialID := initial["event"].(map[string]any)["event_id"].(string)
 					_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "session.created", "client_event_id": initialID}})
 					_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "conv_1"}}})
-					_ = connection.ReadJSON(&turn)
-					_ = connection.ReadJSON(&turn)
+					if err := connection.ReadJSON(&turn); err != nil || turn["event"].(map[string]any)["type"] != "response.create" {
+						t.Errorf("read atomic response.create: value=%#v err=%v", turn, err)
+						return
+					}
 					if test.final != nil {
 						_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": test.final})
 					}
@@ -1913,7 +1817,7 @@ func TestWebStreamErrorsPenalizeEgressOnlyOnReadFailure(t *testing.T) {
 					t.Fatal(err)
 				}
 				nodes := &recordingWebEgressRepository{node: egressdomain.Node{ID: 1, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1}}
-				adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual"}, infraegress.NewManager(nodes, cipher), cipher, nil, nil)
+				adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(nodes, cipher), cipher, nil, nil)
 				credential := account.Credential{ID: 1, UserID: "497f19f8-49d4-458a-bee4-43ec3dcaf8ca", EncryptedAccessToken: encrypted}
 				var response *provider.Response
 				switch mode {

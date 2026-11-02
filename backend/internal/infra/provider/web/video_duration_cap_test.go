@@ -76,8 +76,7 @@ func TestGenerateVideoCapsBasicCredentialBeforeUpstream(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test",
-		VideoTimeoutSeconds: 5, FreeVideoDurationCap: 6,
+		BaseURL: server.URL, VideoTimeoutSeconds: 5, FreeVideoDurationCap: 6,
 	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	adapter.videoNow = sequentialVideoTestClock()
 

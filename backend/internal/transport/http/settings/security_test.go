@@ -14,23 +14,32 @@ func TestSettingsDTOExcludesBrowserIdentityFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	lower := strings.ToLower(string(data))
-	for _, forbidden := range []string{"grok_device_id", "x-anonuserid", "x-userid", "x-challenge", "x-signature"} {
+	for _, forbidden := range []string{"grok_device_id", "x-anonuserid", "x-userid", "x-challenge", "x-signature", "statsig", "castle"} {
 		if strings.Contains(lower, forbidden) {
 			t.Fatalf("settings response contains forbidden field %q", forbidden)
 		}
 	}
 }
 
-func TestSettingsResponseDoesNotExposeManualStatsigValue(t *testing.T) {
-	response := newSettingsResponse(settingsapp.Snapshot{Config: settingsapp.EditableConfig{ProviderWeb: settingsapp.ProviderWebConfig{
-		StatsigMode: "manual", StatsigManualValue: "must-not-leak", StatsigManualConfigured: true,
-	}}})
-	data, err := json.Marshal(response)
+func TestProviderWebSettingsRoundTripWithoutSigningService(t *testing.T) {
+	var dto settingsConfigDTO
+	body := `{"providerWeb":{"baseURL":"https://grok.com","clearanceMode":"manual","quotaTimeout":"25s","chatTimeout":"2m","streamIdleTimeout":"90s","imageTimeout":"3m","videoTimeout":"10m","mediaConcurrency":4,"freeVideoDurationCap":6,"allowNSFW":true}}`
+	if err := json.Unmarshal([]byte(body), &dto); err != nil {
+		t.Fatal(err)
+	}
+	input := dto.toApplication()
+	response := newSettingsResponse(settingsapp.Snapshot{Config: input})
+	if response.Config.ProviderWeb != dto.ProviderWeb {
+		t.Fatalf("Web settings did not round-trip: %#v", response.Config.ProviderWeb)
+	}
+	data, err := json.Marshal(response.Config.ProviderWeb)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "must-not-leak") || strings.Contains(string(data), "statsigManualValue") {
-		t.Fatalf("settings response leaked manual Statsig: %s", data)
+	for _, forbidden := range []string{"statsig", "castle", "browser"} {
+		if strings.Contains(strings.ToLower(string(data)), forbidden) {
+			t.Fatalf("Web settings contain obsolete dependency %q: %s", forbidden, data)
+		}
 	}
 }
 

@@ -42,7 +42,7 @@ func TestWebVideoCheckpointNeverGeneratesASubmittedVideoAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test", VideoTimeoutSeconds: 5},
+	adapter := NewAdapter(Config{BaseURL: server.URL, VideoTimeoutSeconds: 5},
 		infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	var saved []string
 	request := provider.VideoRequest{

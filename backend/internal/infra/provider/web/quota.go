@@ -110,7 +110,6 @@ func (a *Adapter) SyncQuotaGroup(ctx context.Context, credential account.Credent
 	}
 	request.Header = buildHeaders(token, lease, "application/json")
 	applyAppHeaders(request.Header, cfg.BaseURL, cfg.BaseURL+"/imagine")
-	a.applySignedStatsig(requestCtx, request, token, lease)
 	response, err := lease.DoDeferredForbidden(request)
 	if err != nil {
 		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
@@ -330,38 +329,26 @@ func (a *Adapter) SyncQuotaMode(ctx context.Context, credential account.Credenti
 	requestCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.QuotaTimeoutSeconds)*time.Second)
 	defer cancel()
 	endpoint := cfg.BaseURL + "/rest/rate-limits"
-	var response *http.Response
-	var body []byte
-	for attempt := 0; attempt < 2; attempt++ {
-		request, requestErr := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
-		if requestErr != nil {
-			return account.QuotaWindow{}, requestErr
-		}
-		request.Header = buildHeaders(token, lease, "application/json")
-		applyAppHeaders(request.Header, cfg.BaseURL, cfg.BaseURL+"/")
-		a.applySignedStatsig(requestCtx, request, token, lease)
-		response, err = lease.DoDeferredForbidden(request)
-		if err != nil {
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
-			return account.QuotaWindow{}, err
-		}
-		body, err = io.ReadAll(io.LimitReader(response.Body, 4<<20))
-		_ = response.Body.Close()
-		if err != nil {
-			return account.QuotaWindow{}, err
-		}
-		if response.StatusCode == http.StatusForbidden {
-			// Preserve definitive account-block signals before a Statsig retry can discard the first response.
-			if provider.IsDefinitiveAccountBlockBody(body) {
-				return account.QuotaWindow{}, fmt.Errorf("%w: account blocked", provider.ErrUnauthorized)
-			}
-			lease.InvalidateClearance()
-			if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
-				continue
-			}
-		}
-		break
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return account.QuotaWindow{}, err
 	}
+	request.Header = buildHeaders(token, lease, "application/json")
+	applyAppHeaders(request.Header, cfg.BaseURL, cfg.BaseURL+"/")
+	response, err := lease.DoDeferredForbidden(request)
+	if err != nil {
+		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
+		return account.QuotaWindow{}, err
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	_ = response.Body.Close()
+	if err != nil {
+		return account.QuotaWindow{}, err
+	}
+	if response.StatusCode == http.StatusForbidden && !provider.IsDefinitiveAccountBlockBody(body) {
+		lease.InvalidateClearance()
+	}
+
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if response.StatusCode == http.StatusUnauthorized {
 			return account.QuotaWindow{}, provider.ErrUnauthorized

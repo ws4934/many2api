@@ -82,7 +82,7 @@ func TestFreshWebVideoRejectsFastResultsButKeepsDownloadRecovery(t *testing.T) {
 	}
 	for _, elapsed := range []time.Duration{0, 5800 * time.Millisecond, 10 * time.Second, 10*time.Second + time.Nanosecond, 40 * time.Second} {
 		t.Run(elapsed.String(), func(t *testing.T) {
-			a := NewAdapter(Config{BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test", VideoTimeoutSeconds: 5}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+			a := NewAdapter(Config{BaseURL: server.URL, VideoTimeoutSeconds: 5}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 			calls := 0
 			a.videoNow = func() time.Time {
 				calls++

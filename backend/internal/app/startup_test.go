@@ -22,13 +22,53 @@ import (
 func TestReadinessStartupReportDoesNotExposeInternalErrors(t *testing.T) {
 	state := newStartupState(0)
 	state.recordError(errors.New("postgres://private-host/internal"))
-	_, _, report, _ := state.snapshot()
+	_, _, report := state.snapshot()
 	payload, err := json.Marshal(newReadinessStartupReport(report))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(payload), "private-host") || !strings.Contains(string(payload), `"errorCount":1`) {
 		t.Fatalf("public readiness leaked internal error: %s", payload)
+	}
+}
+
+func TestReadinessWebDoesNotRequireSignatureWarmup(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "web-readiness.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	accounts := relational.NewAccountRepository(database)
+	models := relational.NewModelRepository(database)
+	now := time.Now().UTC()
+	web, _, err := accounts.UpsertByIdentity(ctx, accountdomain.Credential{
+		Provider: accountdomain.ProviderWeb, AuthType: accountdomain.AuthTypeSSO,
+		Name: "web-ready", SourceKey: "web-ready", EncryptedAccessToken: "access",
+		WebTier: accountdomain.WebTierBasic, Enabled: true, AuthStatus: accountdomain.AuthStatusActive, MaxConcurrent: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := models.UpsertRoutes(ctx, []modeldomain.Route{{
+		PublicID: "web-model", Provider: accountdomain.ProviderWeb, UpstreamModel: "grok-chat-fast", Capability: modeldomain.CapabilityChat, Enabled: true,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := models.ReplaceAccountCapabilities(ctx, web.ID, []string{"grok-chat-fast"}, now); err != nil {
+		t.Fatal(err)
+	}
+	state := newStartupState(0)
+	state.setPhase("running")
+	snapshot := readinessSnapshot(ctx, state, func(context.Context) error { return nil }, models, accounts, provider.NewRegistry(), nil)
+	if !snapshot.Ready || snapshot.State != "ready" || snapshot.Components["grok_web"].State != "ready" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if _, exists := snapshot.Components["statsig"]; exists {
+		t.Fatalf("obsolete readiness dependency: %#v", snapshot.Components)
 	}
 }
 
@@ -64,7 +104,6 @@ func TestReadinessKeepsBuildReadyWhenWebIsUnavailable(t *testing.T) {
 	}
 	state := newStartupState(0)
 	state.setPhase("running")
-	state.setStatsig("unavailable", "test", 0)
 	snapshot := readinessSnapshot(ctx, state, func(context.Context) error { return nil }, models, accounts, provider.NewRegistry(), nil)
 	if !snapshot.Ready || snapshot.State != "degraded" {
 		t.Fatalf("snapshot = %#v", snapshot)

@@ -75,10 +75,6 @@ export const settingsSchema = z.object({
   }),
   providerWeb: z.object({
     baseURL: z.url().refine((value) => value.startsWith("https://")),
-    statsigMode: z.enum(["manual", "url"]),
-    statsigManualValue: z.string().trim().max(4096),
-    statsigManualConfigured: z.boolean(),
-    statsigSignerURL: z.string().trim().max(2048),
     clearanceMode: z.enum(["manual", "flaresolverr", "on_demand"]),
     flareSolverrURL: z.string().trim().max(2048),
     clearanceTimeout: durationSchema.refine((value) => durationSeconds(value) >= 10 && durationSeconds(value) <= 300),
@@ -93,17 +89,6 @@ export const settingsSchema = z.object({
     }
     if (durationSeconds(value.recoveryBackoffMax) < durationSeconds(value.recoveryBackoffBase)) {
       context.addIssue({ code: "custom", path: ["recoveryBackoffMax"], message: "invalid" });
-    }
-    if (value.statsigMode === "manual" && !value.statsigManualConfigured && value.statsigManualValue.length === 0) {
-      context.addIssue({ code: "custom", path: ["statsigManualValue"], message: "required" });
-    }
-    if (value.statsigManualValue.length > 0 && !validStatsigID(value.statsigManualValue)) {
-      context.addIssue({ code: "custom", path: ["statsigManualValue"], message: "invalid" });
-    }
-    if (value.statsigMode === "url") {
-      if (!validStatsigSignerURL(value.statsigSignerURL)) {
-        context.addIssue({ code: "custom", path: ["statsigSignerURL"], message: "invalid" });
-      }
     }
     if (value.clearanceMode !== "manual" && !validHTTPURL(value.flareSolverrURL)) {
       context.addIssue({ code: "custom", path: ["flareSolverrURL"], message: "invalid" });
@@ -204,7 +189,6 @@ export function toSettingsForm(config: SettingsConfigDTO): SettingsForm {
     providerBuild: { ...config.providerBuild, responseHeaderTimeout: parseDuration(config.providerBuild.responseHeaderTimeout), streamIdleTimeout: parseDuration(config.providerBuild.streamIdleTimeout) },
     providerWeb: {
       ...config.providerWeb,
-      statsigManualValue: "",
       clearanceTimeout: parseDuration(config.providerWeb.clearanceTimeout), clearanceRefresh: parseDuration(config.providerWeb.clearanceRefresh),
       quotaTimeout: parseDuration(config.providerWeb.quotaTimeout), chatTimeout: parseDuration(config.providerWeb.chatTimeout), streamIdleTimeout: parseDuration(config.providerWeb.streamIdleTimeout),
       imageTimeout: parseDuration(config.providerWeb.imageTimeout), videoTimeout: parseDuration(config.providerWeb.videoTimeout),
@@ -359,33 +343,11 @@ function parseDurationMilliseconds(value: string): number {
   return Math.round(durationSeconds(parseDuration(value)) * 1000);
 }
 
-function validStatsigID(value: string): boolean {
-  try {
-    const normalized = value.trim().replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    return atob(padded).length === 70;
-  } catch {
-    return false;
-  }
-}
-
-function validStatsigSignerURL(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    if (parsed.username !== "" || parsed.password !== "" || parsed.search !== "" || parsed.hash !== "") return false;
-    const internal = internalSignerHostname(parsed.hostname);
-    if (internal) return parsed.protocol === "http:" || parsed.protocol === "https:";
-    return parsed.protocol === "https:" && (parsed.port === "" || parsed.port === "443");
-  } catch {
-    return false;
-  }
-}
-
 function validHTTPURL(value: string): boolean {
   try {
     const parsed = new URL(value);
     if (parsed.username !== "" || parsed.password !== "" || parsed.search !== "" || parsed.hash !== "") return false;
-    const internal = internalSignerHostname(parsed.hostname);
+    const internal = internalServiceHostname(parsed.hostname);
     if (internal) return parsed.protocol === "http:" || parsed.protocol === "https:";
     return parsed.protocol === "https:" && (parsed.port === "" || parsed.port === "443");
   } catch {
@@ -541,7 +503,7 @@ export function validSubscriptionProxyURL(value: string): boolean {
   return !value.includes("{account}") && validProxyURL(value);
 }
 
-function internalSignerHostname(value: string): boolean {
+function internalServiceHostname(value: string): boolean {
   const host = value.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
   if (!host.includes(".")) {

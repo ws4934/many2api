@@ -141,25 +141,21 @@ type providerBuildConfigDTO struct {
 }
 
 type providerWebConfigDTO struct {
-	BaseURL                 string `json:"baseURL"`
-	StatsigMode             string `json:"statsigMode"`
-	StatsigManualValue      string `json:"statsigManualValue,omitempty"`
-	StatsigManualConfigured bool   `json:"statsigManualConfigured"`
-	StatsigSignerURL        string `json:"statsigSignerURL"`
-	ClearanceMode           string `json:"clearanceMode"`
-	FlareSolverrURL         string `json:"flareSolverrURL"`
-	ClearanceTimeout        string `json:"clearanceTimeout"`
-	ClearanceRefresh        string `json:"clearanceRefresh"`
-	QuotaTimeout            string `json:"quotaTimeout"`
-	ChatTimeout             string `json:"chatTimeout"`
-	StreamIdleTimeout       string `json:"streamIdleTimeout"`
-	ImageTimeout            string `json:"imageTimeout"`
-	VideoTimeout            string `json:"videoTimeout"`
-	MediaConcurrency        int    `json:"mediaConcurrency"`
-	AllowNSFW               bool   `json:"allowNSFW"`
-	FreeVideoDurationCap    int    `json:"freeVideoDurationCap"`
-	RecoveryBackoffBase     string `json:"recoveryBackoffBase"`
-	RecoveryBackoffMax      string `json:"recoveryBackoffMax"`
+	BaseURL              string `json:"baseURL"`
+	ClearanceMode        string `json:"clearanceMode"`
+	FlareSolverrURL      string `json:"flareSolverrURL"`
+	ClearanceTimeout     string `json:"clearanceTimeout"`
+	ClearanceRefresh     string `json:"clearanceRefresh"`
+	QuotaTimeout         string `json:"quotaTimeout"`
+	ChatTimeout          string `json:"chatTimeout"`
+	StreamIdleTimeout    string `json:"streamIdleTimeout"`
+	ImageTimeout         string `json:"imageTimeout"`
+	VideoTimeout         string `json:"videoTimeout"`
+	MediaConcurrency     int    `json:"mediaConcurrency"`
+	AllowNSFW            bool   `json:"allowNSFW"`
+	FreeVideoDurationCap int    `json:"freeVideoDurationCap"`
+	RecoveryBackoffBase  string `json:"recoveryBackoffBase"`
+	RecoveryBackoffMax   string `json:"recoveryBackoffMax"`
 }
 
 type batchConfigDTO struct {
@@ -269,8 +265,6 @@ func (value settingsConfigDTO) toApplication() settingsapp.EditableConfig {
 		},
 		ProviderWeb: settingsapp.ProviderWebConfig{
 			BaseURL: value.ProviderWeb.BaseURL, QuotaTimeout: value.ProviderWeb.QuotaTimeout,
-			StatsigMode: value.ProviderWeb.StatsigMode, StatsigManualValue: value.ProviderWeb.StatsigManualValue,
-			StatsigManualConfigured: value.ProviderWeb.StatsigManualConfigured, StatsigSignerURL: value.ProviderWeb.StatsigSignerURL,
 			ClearanceMode: value.ProviderWeb.ClearanceMode, FlareSolverrURL: value.ProviderWeb.FlareSolverrURL,
 			ClearanceTimeout: value.ProviderWeb.ClearanceTimeout, ClearanceRefresh: value.ProviderWeb.ClearanceRefresh,
 			ChatTimeout: value.ProviderWeb.ChatTimeout, StreamIdleTimeout: value.ProviderWeb.StreamIdleTimeout,
@@ -346,9 +340,7 @@ func newSettingsResponse(value settingsapp.Snapshot) settingsResponse {
 			},
 			ProviderWeb: providerWebConfigDTO{
 				BaseURL: config.ProviderWeb.BaseURL, QuotaTimeout: config.ProviderWeb.QuotaTimeout,
-				StatsigMode: config.ProviderWeb.StatsigMode, StatsigManualConfigured: config.ProviderWeb.StatsigManualConfigured,
-				StatsigSignerURL: config.ProviderWeb.StatsigSignerURL,
-				ClearanceMode:    config.ProviderWeb.ClearanceMode, FlareSolverrURL: config.ProviderWeb.FlareSolverrURL,
+				ClearanceMode: config.ProviderWeb.ClearanceMode, FlareSolverrURL: config.ProviderWeb.FlareSolverrURL,
 				ClearanceTimeout: config.ProviderWeb.ClearanceTimeout, ClearanceRefresh: config.ProviderWeb.ClearanceRefresh,
 				ChatTimeout: config.ProviderWeb.ChatTimeout, StreamIdleTimeout: config.ProviderWeb.StreamIdleTimeout,
 				ImageTimeout:     config.ProviderWeb.ImageTimeout,

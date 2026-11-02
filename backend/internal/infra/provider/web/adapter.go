@@ -17,9 +17,6 @@ import (
 
 type Config struct {
 	BaseURL                  string
-	StatsigMode              string
-	StatsigManualValue       string
-	StatsigSignerURL         string
 	QuotaTimeoutSeconds      int
 	ChatTimeoutSeconds       int
 	StreamIdleTimeoutSeconds int
@@ -39,13 +36,12 @@ type Adapter struct {
 	cipher          *security.Cipher
 	states          repository.ResponseRepository
 	assets          provider.ImageAssetStore
-	statsig         *statsigSigner
 	logger          *slog.Logger
 }
 
 func NewAdapter(cfg Config, egress *infraegress.Manager, cipher *security.Cipher, states repository.ResponseRepository, assets provider.ImageAssetStore) *Adapter {
 	cfg = normalizedConfig(cfg)
-	return &Adapter{videoNow: time.Now, cfg: cfg, accountsBaseURL: officialAccountsBaseURL, egress: egress, cipher: cipher, states: states, assets: assets, statsig: newStatsigSigner(), logger: slog.Default()}
+	return &Adapter{videoNow: time.Now, cfg: cfg, accountsBaseURL: officialAccountsBaseURL, egress: egress, cipher: cipher, states: states, assets: assets, logger: slog.Default()}
 }
 
 func (a *Adapter) SetLogger(logger *slog.Logger) {
@@ -64,12 +60,6 @@ func (a *Adapter) log() *slog.Logger {
 func normalizedConfig(cfg Config) Config {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://grok.com"
-	}
-	if cfg.StatsigMode == "" {
-		cfg.StatsigMode = "url"
-	}
-	if cfg.StatsigSignerURL == "" {
-		cfg.StatsigSignerURL = defaultStatsigSignerURL
 	}
 	if cfg.QuotaTimeoutSeconds <= 0 {
 		cfg.QuotaTimeoutSeconds = 25
@@ -96,12 +86,8 @@ func normalizedConfig(cfg Config) Config {
 func (a *Adapter) UpdateConfig(cfg Config) {
 	cfg = normalizedConfig(cfg)
 	a.mu.Lock()
-	changed := a.cfg.StatsigMode != cfg.StatsigMode || a.cfg.StatsigManualValue != cfg.StatsigManualValue || a.cfg.StatsigSignerURL != cfg.StatsigSignerURL || a.cfg.BaseURL != cfg.BaseURL
 	a.cfg = cfg
 	a.mu.Unlock()
-	if changed && a.statsig != nil {
-		a.statsig.Clear()
-	}
 }
 
 func (a *Adapter) config() Config {

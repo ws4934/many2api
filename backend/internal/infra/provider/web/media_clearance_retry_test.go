@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,41 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 )
+
+func TestMediaStructuredForbiddenIsNotReplayed(t *testing.T) {
+	for _, body := range []string{
+		`{"code":7,"message":"This page is out of date. Reload to continue.","details":[]}`,
+		`{"error":{"code":"content-moderated","message":"rejected"}}`,
+		`{"code":7,"message":"User is blocked [WKE=unauthorized:blocked-user]","details":[]}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				calls.Add(1)
+				if request.URL.Path != "/rest/app-chat/conversations/new" || request.Method != http.MethodPost {
+					t.Errorf("unexpected request: %s %s", request.Method, request.URL.Path)
+				}
+				if request.Header.Get("x-xai-request-id") == "" || request.Header.Get("x-statsig-id") != "" {
+					t.Errorf("native request headers = %#v", request.Header)
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(http.StatusForbidden)
+				_, _ = io.WriteString(writer, body)
+			}))
+			t.Cleanup(server.Close)
+			adapter, credential := testMediaAdapter(t, server.URL)
+			_, err := adapter.GenerateVideo(context.Background(), provider.VideoRequest{
+				Credential: credential, Prompt: "test", Duration: 5,
+			})
+			if err == nil || !strings.Contains(err.Error(), "403") {
+				t.Fatalf("expected upstream rejection, got %v", err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("request count = %d, want no replay", calls.Load())
+			}
+		})
+	}
+}
 
 func TestIsClearanceRefreshableMediaError(t *testing.T) {
 	tests := []struct {
@@ -182,12 +218,10 @@ func TestGenerateLiteImageReacquiresAfterChallengeHandshake(t *testing.T) {
 		_ = connection.WriteJSON(map[string]any{
 			"session_id": "session-1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "session-1"}},
 		})
-		for range 2 {
-			var message map[string]any
-			if err := connection.ReadJSON(&message); err != nil {
-				t.Errorf("read Gateway turn: %v", err)
-				return
-			}
+		var message map[string]any
+		if err := connection.ReadJSON(&message); err != nil || message["event"].(map[string]any)["type"] != "response.create" {
+			t.Errorf("read atomic Gateway turn: value=%#v err=%v", message, err)
+			return
 		}
 		_ = connection.WriteJSON(map[string]any{
 			"session_id": "session-1",
@@ -448,7 +482,7 @@ func testMediaAdapter(t *testing.T, baseURL string) (*Adapter, account.Credentia
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{BaseURL: baseURL, StatsigMode: "manual", ChatTimeoutSeconds: 5, ImageTimeoutSeconds: 5, MaxInputImageBytes: 1 << 20}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, imageAssetStoreStub{})
+	adapter := NewAdapter(Config{BaseURL: baseURL, ChatTimeoutSeconds: 5, ImageTimeoutSeconds: 5, MaxInputImageBytes: 1 << 20}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, imageAssetStoreStub{})
 	credential := account.Credential{ID: 1, Provider: account.ProviderWeb, EncryptedAccessToken: encrypted}
 	return adapter, credential
 }

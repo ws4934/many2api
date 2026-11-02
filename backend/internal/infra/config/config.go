@@ -16,18 +16,15 @@ import (
 
 	clientkeydomain "github.com/chenyme/grok2api/backend/internal/domain/clientkey"
 	settingsdomain "github.com/chenyme/grok2api/backend/internal/domain/settings"
-	"github.com/chenyme/grok2api/backend/internal/pkg/signerurl"
+	"github.com/chenyme/grok2api/backend/internal/pkg/serviceurl"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	DatabaseURLEnv                = "GROK2API_DATABASE_URL"
-	StatsigModeManual             = "manual"
-	StatsigModeURL                = "url"
 	ClearanceModeManual           = "manual"
 	ClearanceModeFlareSolverr     = "flaresolverr"
 	ClearanceModeOnDemand         = "on_demand"
-	DefaultStatsigSignerURL       = "https://grok.wodf.de/sign"
 	DefaultFlareSolverrURL        = "http://flaresolverr:8191"
 	RecommendedBuildClientVersion = "1.0.60"
 	RecommendedBuildUserAgent     = "grok-shell/" + RecommendedBuildClientVersion + " (linux; x86_64)"
@@ -205,9 +202,6 @@ const DefaultBuildFallbackBaseURL = "https://api.x.ai/v1"
 
 type WebProviderConfig struct {
 	BaseURL              string   `yaml:"baseURL"`
-	StatsigMode          string   `yaml:"-"`
-	StatsigManualValue   string   `yaml:"-"`
-	StatsigSignerURL     string   `yaml:"-"`
 	ClearanceMode        string   `yaml:"-"`
 	FlareSolverrURL      string   `yaml:"-"`
 	ClearanceTimeout     Duration `yaml:"-"`
@@ -646,18 +640,6 @@ func (c Config) Validate() error {
 	if err != nil || webURL.Scheme != "https" || webURL.Host == "" || webURL.User != nil {
 		return errors.New("provider.web.baseURL 必须是无凭据的 HTTPS URL")
 	}
-	switch c.Provider.Web.StatsigMode {
-	case StatsigModeManual:
-		if !validStatsigID(c.Provider.Web.StatsigManualValue) {
-			return errors.New("provider.web 手动 x-statsig-id 格式无效")
-		}
-	case StatsigModeURL:
-		if err := signerurl.Validate(c.Provider.Web.StatsigSignerURL); err != nil {
-			return fmt.Errorf("provider.web Statsig 签名 URL 无效: %w", err)
-		}
-	default:
-		return errors.New("provider.web Statsig 模式必须是 manual 或 url")
-	}
 	switch c.Provider.Web.ClearanceMode {
 	case ClearanceModeManual:
 	case ClearanceModeFlareSolverr, ClearanceModeOnDemand:
@@ -964,8 +946,7 @@ func defaultConfig() Config {
 				StreamIdleTimeout: Duration(settingsdomain.DefaultBuildStreamIdleTimeout),
 			},
 			Web: WebProviderConfig{
-				BaseURL: "https://grok.com", StatsigMode: StatsigModeURL, StatsigSignerURL: DefaultStatsigSignerURL,
-				ClearanceMode: ClearanceModeManual, FlareSolverrURL: DefaultFlareSolverrURL,
+				BaseURL: "https://grok.com", ClearanceMode: ClearanceModeManual, FlareSolverrURL: DefaultFlareSolverrURL,
 				ClearanceTimeout: Duration(time.Minute), ClearanceRefresh: Duration(10 * time.Minute),
 				QuotaTimeout: Duration(25 * time.Second),
 				ChatTimeout:  Duration(2 * time.Minute), StreamIdleTimeout: Duration(settingsdomain.DefaultWebStreamIdleTimeout),
@@ -1040,19 +1021,7 @@ func defaultConfig() Config {
 
 // ValidateServiceURL 校验 FlareSolverr、mint 等辅助服务地址：公网须 HTTPS:443，内网可用 HTTP。
 func ValidateServiceURL(value string) error {
-	if err := signerurl.Validate(value); err != nil {
-		return errors.New(strings.ReplaceAll(err.Error(), "签名 URL", "URL"))
-	}
-	return nil
-}
-
-func validStatsigID(value string) bool {
-	value = strings.TrimSpace(value)
-	decoded, err := base64.RawStdEncoding.DecodeString(value)
-	if err != nil {
-		decoded, err = base64.StdEncoding.DecodeString(value)
-	}
-	return err == nil && len(decoded) == 70
+	return serviceurl.Validate(value)
 }
 
 func validCredentialEncryptionKey(value string) bool {

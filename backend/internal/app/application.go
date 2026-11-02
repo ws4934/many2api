@@ -160,7 +160,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (_ *Applic
 	auditRepo := relational.NewAuditRepository(database)
 	responseRepo := relational.NewResponseRepository(database)
 	dashboardRepo := relational.NewDashboardRepository(database)
-	runtimeSettingsRepo := relational.NewRuntimeSettingsRepository(database, cipher)
+	runtimeSettingsRepo := relational.NewRuntimeSettingsRepository(database)
 	egressRepo := relational.NewEgressRepository(database)
 	mediaJobRepo := relational.NewMediaJobRepository(database)
 	mediaAssetRepo := relational.NewMediaAssetRepository(database)
@@ -500,8 +500,6 @@ func maxBatchConcurrency(value config.BatchConfig) int {
 func webProviderConfig(cfg config.Config) webprovider.Config {
 	return webprovider.Config{
 		BaseURL: cfg.Provider.Web.BaseURL, QuotaTimeoutSeconds: int(cfg.Provider.Web.QuotaTimeout.Value().Seconds()),
-		StatsigMode: cfg.Provider.Web.StatsigMode, StatsigManualValue: cfg.Provider.Web.StatsigManualValue,
-		StatsigSignerURL:   cfg.Provider.Web.StatsigSignerURL,
 		ChatTimeoutSeconds: int(cfg.Provider.Web.ChatTimeout.Value().Seconds()), StreamIdleTimeoutSeconds: int(cfg.Provider.Web.StreamIdleTimeout.Value().Seconds()),
 		ImageTimeoutSeconds: int(cfg.Provider.Web.ImageTimeout.Value().Seconds()),
 		VideoTimeoutSeconds: int(cfg.Provider.Web.VideoTimeout.Value().Seconds()), MaxInputImageBytes: cfg.Media.MaxImageBytes,
@@ -717,10 +715,6 @@ func (a *Application) Run(ctx context.Context) error {
 	})
 	startBackground("account_auto_clean", func(taskCtx context.Context) error {
 		a.accounts.RunAccountAutoClean(taskCtx)
-		return nil
-	})
-	startBackground("statsig_warmup", func(taskCtx context.Context) error {
-		a.runStatsigWarmup(taskCtx)
 		return nil
 	})
 	startBackground("web_quota_startup_catchup", func(taskCtx context.Context) error {

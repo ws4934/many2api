@@ -1,4 +1,4 @@
-package signerurl
+package serviceurl
 
 import (
 	"fmt"
@@ -16,12 +16,12 @@ func Validate(value string) error {
 	raw := strings.TrimSpace(value)
 	parsed, err := url.ParseRequestURI(raw)
 	if err != nil || parsed.Host == "" || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || strings.Contains(raw, "#") || len(raw) > MaxLength {
-		return fmt.Errorf("签名 URL 必须是无凭据、查询参数和片段的完整地址")
+		return fmt.Errorf("服务 URL 必须是无凭据、查询参数和片段的完整地址")
 	}
 	if port := parsed.Port(); port != "" {
 		value, portErr := strconv.Atoi(port)
 		if portErr != nil || value < 1 || value > 65535 {
-			return fmt.Errorf("签名 URL 端口无效")
+			return fmt.Errorf("服务 URL 端口无效")
 		}
 	}
 	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
@@ -36,7 +36,7 @@ func Validate(value string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("公网签名 URL 必须使用 HTTPS:443；HTTP 和自定义端口仅允许可信内网地址")
+	return fmt.Errorf("公网服务 URL 必须使用 HTTPS:443；HTTP 和自定义端口仅允许可信内网地址")
 }
 
 func IsInternalHost(host string) bool {

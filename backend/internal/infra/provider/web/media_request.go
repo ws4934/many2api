@@ -168,59 +168,40 @@ func (a *Adapter) postJSON(ctx context.Context, cfg Config, lease *egress.Lease,
 
 func (a *Adapter) postJSONWithReferer(ctx context.Context, cfg Config, lease *egress.Lease, token, endpoint string, payload any, timeout time.Duration, referer string) (*http.Response, error) {
 	data, _ := json.Marshal(payload)
-	for attempt := 0; attempt < 2; attempt++ {
-		requestCtx, cancel := context.WithTimeout(ctx, timeout)
-		request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(data))
-		if err != nil {
-			cancel()
-			return nil, err
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	request.Header = buildHeaders(token, lease, "application/json")
+	applyAppHeaders(request.Header, cfg.BaseURL, referer)
+	response, err := lease.DoDeferredForbidden(request)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if response.StatusCode == http.StatusForbidden {
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, webMediaDiagnosticBodyLimit+1))
+		_ = response.Body.Close()
+		cancel()
+		if readErr != nil {
+			return nil, fmt.Errorf("读取 Grok Web 403 响应: %w", readErr)
 		}
-		request.Header = buildHeaders(token, lease, "application/json")
-		applyAppHeaders(request.Header, cfg.BaseURL, referer)
-		a.applySignedStatsig(requestCtx, request, token, lease)
-		response, err := lease.DoDeferredForbidden(request)
-		if err != nil {
-			cancel()
-			return nil, err
+		truncated := len(body) > webMediaDiagnosticBodyLimit
+		if truncated {
+			body = body[:webMediaDiagnosticBodyLimit]
 		}
-		if response.StatusCode == http.StatusForbidden {
-			body, readErr := io.ReadAll(io.LimitReader(response.Body, webMediaDiagnosticBodyLimit+1))
-			_ = response.Body.Close()
-			cancel()
-			if readErr != nil {
-				return nil, fmt.Errorf("读取 Grok Web 403 响应: %w", readErr)
-			}
-			truncated := len(body) > webMediaDiagnosticBodyLimit
-			if truncated {
-				body = body[:webMediaDiagnosticBodyLimit]
-			}
-			upstreamErr := newWebMediaUpstreamError(response.StatusCode, body, truncated)
-			response.Body = io.NopCloser(bytes.NewReader(body))
-			response.ContentLength = int64(len(body))
-			if isClearanceRefreshableMediaError(upstreamErr) {
-				lease.InvalidateClearance()
-				_ = a.invalidateSignedStatsig(http.MethodPost, endpoint)
-				return response, nil
-			}
-			// Code 7 is the application-layer equivalent of reloading the Grok
-			// page: refresh only the path-bound Statsig signature and replay the
-			// explicitly rejected POST once. It is not a Cloudflare challenge, so
-			// the current Clearance lease remains valid.
-			if isStatsigRefreshableMediaError(upstreamErr, body) {
-				if attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, endpoint) {
-					continue
-				}
-				return response, nil
-			}
-			// Remaining structured JSON responses are application policy decisions.
-			// They must not invalidate Clearance, affect egress health, or be replayed.
-			if upstreamErr.bodyKind == "json" || attempt > 0 || !a.invalidateSignedStatsig(http.MethodPost, endpoint) {
-				return response, nil
-			}
-			continue
+		upstreamErr := newWebMediaUpstreamError(response.StatusCode, body, truncated)
+		response.Body = io.NopCloser(bytes.NewReader(body))
+		response.ContentLength = int64(len(body))
+		// Only a real session challenge invalidates Clearance. Structured
+		// policy / anti-bot errors are returned unchanged, never signature-replayed.
+		if isClearanceRefreshableMediaError(upstreamErr) {
+			lease.InvalidateClearance()
 		}
-		response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
 		return response, nil
 	}
-	return nil, fmt.Errorf("Grok Web Statsig 刷新失败")
+	response.Body = &cancelBody{ReadCloser: response.Body, cancel: cancel}
+	return response, nil
 }

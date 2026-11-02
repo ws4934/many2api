@@ -92,9 +92,6 @@ type MediaConfig struct {
 
 type ProviderWebConfig struct {
 	BaseURL              string
-	StatsigMode          string
-	StatsigManualValue   string
-	StatsigSignerURL     string
 	ClearanceMode        string
 	FlareSolverrURL      string
 	ClearanceTimeout     time.Duration

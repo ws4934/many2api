@@ -8,7 +8,6 @@ import (
 	"time"
 
 	settingsdomain "github.com/chenyme/grok2api/backend/internal/domain/settings"
-	"github.com/chenyme/grok2api/backend/internal/infra/security"
 	"github.com/chenyme/grok2api/backend/internal/repository"
 	"gorm.io/gorm"
 )
@@ -16,17 +15,15 @@ import (
 const runtimeSettingsKey = "gateway"
 
 type runtimeSettingsPayload struct {
-	Config                      settingsdomain.Config `json:"config"`
-	EncryptedStatsigManualValue string                `json:"encryptedStatsigManualValue,omitempty"`
+	Config settingsdomain.Config `json:"config"`
 }
 
 type RuntimeSettingsRepository struct {
 	database *Database
-	cipher   *security.Cipher
 }
 
-func NewRuntimeSettingsRepository(database *Database, cipher *security.Cipher) *RuntimeSettingsRepository {
-	return &RuntimeSettingsRepository{database: database, cipher: cipher}
+func NewRuntimeSettingsRepository(database *Database) *RuntimeSettingsRepository {
+	return &RuntimeSettingsRepository{database: database}
 }
 
 func (r *RuntimeSettingsRepository) Get(ctx context.Context) (settingsdomain.Config, time.Time, uint64, bool, error) {
@@ -42,21 +39,11 @@ func (r *RuntimeSettingsRepository) Get(ctx context.Context) (settingsdomain.Con
 	if err := json.Unmarshal([]byte(row.ValueJSON), &payload); err != nil {
 		return settingsdomain.Config{}, time.Time{}, 0, false, fmt.Errorf("解析运行设置: %w", err)
 	}
-	manualValue, err := r.cipher.Decrypt(payload.EncryptedStatsigManualValue)
-	if err != nil {
-		return settingsdomain.Config{}, time.Time{}, 0, false, fmt.Errorf("解密 Statsig 手动值: %w", err)
-	}
-	payload.Config.ProviderWeb.StatsigManualValue = manualValue
 	return payload.Config, row.UpdatedAt, row.Revision, true, nil
 }
 
 func (r *RuntimeSettingsRepository) Save(ctx context.Context, value settingsdomain.Config, expectedRevision uint64) (time.Time, uint64, error) {
-	manualValue, err := r.cipher.Encrypt(value.ProviderWeb.StatsigManualValue)
-	if err != nil {
-		return time.Time{}, 0, fmt.Errorf("加密 Statsig 手动值: %w", err)
-	}
-	value.ProviderWeb.StatsigManualValue = ""
-	payload, err := json.Marshal(runtimeSettingsPayload{Config: value, EncryptedStatsigManualValue: manualValue})
+	payload, err := json.Marshal(runtimeSettingsPayload{Config: value})
 	if err != nil {
 		return time.Time{}, 0, fmt.Errorf("编码运行设置: %w", err)
 	}

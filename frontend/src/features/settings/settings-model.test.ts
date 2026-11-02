@@ -22,6 +22,30 @@ describe("ChatGPT provider settings", () => {
 const adobe = settingsSchema.shape.providerAdobe;
 const minute = { value: 1, unit: "m" } as const;
 
+const web = settingsSchema.shape.providerWeb;
+const webDefaults = {
+  baseURL: "https://grok.com", clearanceMode: "manual", flareSolverrURL: "",
+  clearanceTimeout: minute, clearanceRefresh: { value: 10, unit: "m" },
+  quotaTimeout: { value: 25, unit: "s" }, chatTimeout: { value: 2, unit: "m" },
+  streamIdleTimeout: { value: 90, unit: "s" }, imageTimeout: { value: 3, unit: "m" }, videoTimeout: { value: 10, unit: "m" },
+  mediaConcurrency: 4, allowNSFW: false, freeVideoDurationCap: 6,
+  recoveryBackoffBase: minute, recoveryBackoffMax: { value: 1, unit: "h" },
+} as const;
+
+describe("Grok Web provider settings", () => {
+  it("accepts native settings without a signing or browser service", () => {
+    assert.deepEqual(web.parse(webDefaults), webDefaults);
+    assert.equal(Object.keys(web.shape).some((key) => /statsig|castle|browser/i.test(key)), false);
+  });
+
+  it("retains timeout and clearance validation", () => {
+    assert.equal(web.safeParse({ ...webDefaults, streamIdleTimeout: { value: 3, unit: "m" } }).success, false);
+    assert.equal(web.safeParse({ ...webDefaults, clearanceMode: "on_demand" }).success, false);
+    assert.equal(web.safeParse({ ...webDefaults, clearanceMode: "on_demand", flareSolverrURL: "http://flaresolverr:8191" }).success, true);
+    assert.equal(web.safeParse({ ...webDefaults, recoveryBackoffMax: { value: 30, unit: "s" } }).success, false);
+  });
+});
+
 describe("Adobe provider settings", () => {
   it("accepts an empty, internal or public HTTPS mint URL", () => {
     for (const sherlockMintAPI of ["", "http://mint:8777", "http://127.0.0.1:8777", "https://mint.example.com"]) {

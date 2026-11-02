@@ -48,14 +48,14 @@ func TestGatewaySessionSupportsNewAndExistingConversations(t *testing.T) {
 	}
 }
 
-func TestGatewayTurnEventsOmitCastleAndPreserveAttachments(t *testing.T) {
+func TestGatewayTurnCreateIsAtomicAndPreservesInputs(t *testing.T) {
 	previous := &inferencedomain.WebResponseState{UpstreamParentResponseID: "response-1"}
-	item, response := gatewayTurnEvents("conversation-1", "hello", []string{"file-1"}, previous)
-	itemEvent := item["event"].(map[string]any)
-	if item["session_id"] != "conversation-1" || itemEvent["parent_response_id"] != "response-1" {
-		t.Fatalf("item event = %#v", item)
+	response := gatewayTurnEvent("conversation-1", "hello", []string{"file-1"}, previous)
+	event := response["event"].(map[string]any)
+	if response["session_id"] != "conversation-1" || event["type"] != "response.create" || event["item"] == nil || event["parent_response_id"] != "response-1" {
+		t.Fatalf("expected one response.create containing the message and parent: %#v", response)
 	}
-	encoded, err := json.Marshal(item)
+	encoded, err := json.Marshal(response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,9 +65,30 @@ func TestGatewayTurnEventsOmitCastleAndPreserveAttachments(t *testing.T) {
 			t.Fatalf("item JSON %s missing %s", text, expected)
 		}
 	}
-	responseJSON, _ := json.Marshal(response)
-	if strings.Contains(string(responseJSON), "castle_request_token") {
-		t.Fatalf("response.create unexpectedly contains Castle token: %s", responseJSON)
+	if strings.Contains(text, "castle_request_token") {
+		t.Fatalf("response.create unexpectedly contains Castle token: %s", text)
+	}
+}
+
+func TestGatewayNewTurnHasNoParentOrAttachments(t *testing.T) {
+	response := gatewayTurnEvent("conversation-new", "你好", nil, nil)
+	event := response["event"].(map[string]any)
+	item := event["item"].(map[string]any)
+	if event["type"] != "response.create" || item["type"] != "message" || item["role"] != "user" {
+		t.Fatalf("new turn = %#v", response)
+	}
+	for _, key := range []string{"parent_response_id", "file_attachment_ids"} {
+		if _, exists := event[key]; exists {
+			t.Fatalf("new turn contains unexpected %s: %#v", key, event)
+		}
+	}
+	if _, exists := item["file_attachment_ids"]; exists {
+		t.Fatalf("new message contains attachments: %#v", item)
+	}
+	xGrok := item["x_grok"].(map[string]any)
+	chunks := xGrok["input_chunks"].([]any)
+	if xGrok["client_message_id"] == "" || len(chunks) != 1 || chunks[0].(map[string]any)["text"].(map[string]any)["text"] != "你好" {
+		t.Fatalf("new message = %#v", item)
 	}
 }
 

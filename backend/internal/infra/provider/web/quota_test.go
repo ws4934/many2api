@@ -25,6 +25,36 @@ import (
 
 const capturedWeeklyCreditsHex = "00000000630a610d0000304112001a00220c089abbccd2061080f2d1fc012a0c089ab0f1d2061080f2d1fc013a07080515000020413a070804150000803f3a020802421e0802120c089abbccd2061080f2d1fc011a0c089ab0f1d2061080f2d1fc01580162006801800000000f677270632d7374617475733a300d0a"
 
+func TestSyncQuotaModeUsesNativeRequestOnly(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		if request.Method != http.MethodPost || request.URL.Path != "/rest/rate-limits" {
+			t.Errorf("unexpected auxiliary request: %s %s", request.Method, request.URL.Path)
+			http.NotFound(writer, request)
+			return
+		}
+		if request.Header.Get("x-xai-request-id") == "" || request.Header.Get("x-statsig-id") != "" {
+			t.Errorf("native request headers = %#v", request.Header)
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload["modelName"] != "fast" {
+			t.Errorf("quota payload = %#v, err = %v", payload, err)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"windowSizeSeconds":7200,"remainingQueries":12,"totalQueries":20}`))
+	}))
+	t.Cleanup(server.Close)
+	adapter, credential := testMediaAdapter(t, server.URL)
+	window, err := adapter.SyncQuotaMode(context.Background(), credential, "fast")
+	if err != nil || window.Remaining != 12 || window.Total != 20 || window.Mode != "fast" {
+		t.Fatalf("window = %#v, err = %v", window, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("request count = %d, want one native request", calls.Load())
+	}
+}
+
 func TestParseCapturedWeeklyCreditsResponse(t *testing.T) {
 	body, err := hex.DecodeString(capturedWeeklyCreditsHex)
 	if err != nil {
@@ -116,9 +146,7 @@ func TestSyncQuotaFetchesWeeklyOnlyAfterPaidTierIsConfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
-	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	snapshot, err := adapter.SyncQuota(context.Background(), account.Credential{ID: 2, WebTier: account.WebTierAuto, EncryptedAccessToken: encrypted})
 	if err != nil {
 		t.Fatal(err)
@@ -169,9 +197,7 @@ func TestSyncQuotaFailsWhenPaidWeeklySnapshotIsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
-	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	if _, err := adapter.SyncQuota(context.Background(), account.Credential{ID: 2, WebTier: account.WebTierAuto, EncryptedAccessToken: encrypted}); err == nil {
 		t.Fatal("expected the paid weekly failure to reject the partial snapshot")
 	}
@@ -196,9 +222,7 @@ func TestSyncQuotaStopsAfterFirstUnauthorizedMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
-	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	_, err = adapter.SyncQuota(context.Background(), account.Credential{ID: 3, WebTier: account.WebTierAuto, EncryptedAccessToken: encrypted})
 	if !errors.Is(err, provider.ErrUnauthorized) {
 		t.Fatalf("err = %v", err)
@@ -229,14 +253,11 @@ func TestSyncQuotaBlockedForbiddenIsUnauthorized(t *testing.T) {
 	egressRepository := &recordingWebEgressRepository{node: egressdomain.Node{
 		ID: 1, Name: "web", Scope: egressdomain.ScopeWeb, Enabled: true, Health: 1,
 	}}
-	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
-	}, infraegress.NewManager(egressRepository, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepository, cipher), cipher, nil, nil)
 	_, err = adapter.SyncQuota(context.Background(), account.Credential{ID: 4, WebTier: account.WebTierAuto, EncryptedAccessToken: encrypted})
 	if !errors.Is(err, provider.ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
-	// manual Statsig mode does not invalidate/retry; SyncQuota stops after the first unauthorized mode.
 	if calls.Load() != 1 {
 		t.Fatalf("blocked credential made %d quota requests, want 1", calls.Load())
 	}
@@ -245,10 +266,9 @@ func TestSyncQuotaBlockedForbiddenIsUnauthorized(t *testing.T) {
 	}
 }
 
-func TestSyncQuotaBlockedForbiddenSkipsStatsigRetryInURLMode(t *testing.T) {
+func TestSyncQuotaBlockedForbiddenIsNotReplayed(t *testing.T) {
 	var rateLimitCalls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		// URL mode may also probe the base URL for Statsig meta; only count quota endpoint.
 		if request.URL.Path == "/rest/rate-limits" {
 			rateLimitCalls.Add(1)
 			writer.Header().Set("Content-Type", "application/json")
@@ -268,16 +288,13 @@ func TestSyncQuotaBlockedForbiddenSkipsStatsigRetryInURLMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// URL mode would invalidate Statsig and retry unless blocked body is classified first.
-	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "url", StatsigSignerURL: "https://signer.example/sign",
-	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	_, err = adapter.SyncQuota(context.Background(), account.Credential{ID: 6, WebTier: account.WebTierAuto, EncryptedAccessToken: encrypted})
 	if !errors.Is(err, provider.ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
 	if rateLimitCalls.Load() != 1 {
-		t.Fatalf("blocked credential made %d rate-limits requests, want 1 (no Statsig retry)", rateLimitCalls.Load())
+		t.Fatalf("blocked credential made %d rate-limits requests, want 1", rateLimitCalls.Load())
 	}
 }
 
@@ -297,9 +314,7 @@ func TestSyncQuotaGenericForbiddenIsNotUnauthorized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
-	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	_, err = adapter.SyncQuota(context.Background(), account.Credential{ID: 5, WebTier: account.WebTierAuto, EncryptedAccessToken: encrypted})
 	if err == nil || errors.Is(err, provider.ErrUnauthorized) {
 		t.Fatalf("err = %v, want generic forbidden error", err)
@@ -324,9 +339,7 @@ func TestSyncWeeklyCreditsBlockedForbiddenIsUnauthorized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
-	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	_, err = adapter.SyncQuotaMode(context.Background(), account.Credential{ID: 7, EncryptedAccessToken: encrypted}, weeklyQuotaMode)
 	if !errors.Is(err, provider.ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
@@ -488,9 +501,7 @@ func TestSyncQuotaCorrectsStoredSuperFromFreshWebQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := NewAdapter(Config{
-		BaseURL: server.URL, StatsigMode: "manual", StatsigManualValue: "test-signature",
-	}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
+	adapter := NewAdapter(Config{BaseURL: server.URL}, infraegress.NewManager(egressRepositoryStub{}, cipher), cipher, nil, nil)
 	snapshot, err := adapter.SyncQuota(context.Background(), account.Credential{
 		ID: 1, WebTier: account.WebTierSuper, EncryptedAccessToken: encrypted,
 	})

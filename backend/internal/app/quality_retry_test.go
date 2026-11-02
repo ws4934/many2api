@@ -12,7 +12,6 @@ import (
 	settingsapp "github.com/chenyme/grok2api/backend/internal/application/settings"
 	"github.com/chenyme/grok2api/backend/internal/infra/config"
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
-	"github.com/chenyme/grok2api/backend/internal/infra/security"
 )
 
 func TestDegradedAccountSwitchAppliesAndRestoresRequestRetryPolicy(t *testing.T) {
@@ -39,11 +38,7 @@ func TestDegradedAccountSwitchAppliesAndRestoresRequestRetryPolicy(t *testing.T)
 			if err := db.InitializeSchema(ctx); err != nil {
 				t.Fatal(err)
 			}
-			cipher, err := security.NewCipher(cfg.Secrets.CredentialEncryptionKey)
-			if err != nil {
-				t.Fatal(err)
-			}
-			repo := relational.NewRuntimeSettingsRepository(db, cipher)
+			repo := relational.NewRuntimeSettingsRepository(db)
 			var applied gateway.QualityRetryRuntime
 			service := settingsapp.NewService(cfg, time.Time{}, 0, repo, nil, func(next config.Config) {
 				applied = qualityRetryRuntime(next.QualityGuard)

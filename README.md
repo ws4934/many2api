@@ -293,6 +293,8 @@ Conversation requests are translated to the Build Responses protocol while prese
 
 Web uses a built-in catalog filtered by account tier; higher tiers inherit lower-tier models.
 
+Chat and quota requests run natively in Go, without a Statsig signer or an additional browser/CDP service. Chat sends the user message, attachments, and continuation parent together in one `response.create` event. Optional Cloudflare clearance retains its existing configuration under Media & network.
+
 
 | Model                     | Type         | Minimum tier                   | Gateway surfaces                        |
 | ------------------------- | ------------ | ------------------------------ | --------------------------------------- |

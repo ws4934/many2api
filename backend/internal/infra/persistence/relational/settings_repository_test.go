@@ -2,6 +2,7 @@ package relational
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	settingsdomain "github.com/chenyme/grok2api/backend/internal/domain/settings"
-	"github.com/chenyme/grok2api/backend/internal/infra/security"
 	repositorypkg "github.com/chenyme/grok2api/backend/internal/repository"
 )
 
@@ -23,17 +23,13 @@ func TestRuntimeSettingsRepositoryRoundTrip(t *testing.T) {
 	if err := database.InitializeSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
-	cipher, err := security.NewCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-	if err != nil {
-		t.Fatal(err)
-	}
-	repository := NewRuntimeSettingsRepository(database, cipher)
+	repository := NewRuntimeSettingsRepository(database)
 	if _, _, _, found, err := repository.Get(ctx); err != nil || found {
 		t.Fatalf("initial get found = %v, err = %v", found, err)
 	}
 	settings := settingsdomain.Config{
 		Server:      settingsdomain.ServerConfig{MaxConcurrentRequests: 2048},
-		ProviderWeb: settingsdomain.ProviderWebConfig{StatsigManualValue: "sensitive-statsig-value"},
+		ProviderWeb: settingsdomain.ProviderWebConfig{BaseURL: "https://grok.com", ChatTimeout: time.Minute},
 		Media: settingsdomain.MediaConfig{
 			MaxImageBytes: 16 << 20, MaxTotalBytes: 1 << 30, CleanupThresholdPercent: 80,
 			CleanupInterval: 10 * time.Minute,
@@ -48,21 +44,38 @@ func TestRuntimeSettingsRepositoryRoundTrip(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("saved get found = %v, err = %v", found, err)
 	}
-	if value.Server != settings.Server || value.Routing != settings.Routing || value.Media != settings.Media || !storedUpdatedAt.Equal(updatedAt) || revision != 1 || storedRevision != revision {
+	if value.Server != settings.Server || value.Routing != settings.Routing || value.Media != settings.Media || value.ProviderWeb != settings.ProviderWeb || !storedUpdatedAt.Equal(updatedAt) || revision != 1 || storedRevision != revision {
 		t.Fatalf("saved value = %#v", value)
-	}
-	if value.ProviderWeb.StatsigManualValue != settings.ProviderWeb.StatsigManualValue {
-		t.Fatalf("Statsig manual value = %q", value.ProviderWeb.StatsigManualValue)
 	}
 	var row runtimeSettingsModel
 	if err := database.db.WithContext(ctx).Where("key = ?", runtimeSettingsKey).First(&row).Error; err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(row.ValueJSON, settings.ProviderWeb.StatsigManualValue) {
-		t.Fatalf("Statsig manual value was stored in plaintext: %s", row.ValueJSON)
+	for _, forbidden := range []string{`"version"`, "Statsig", "encryptedStatsigManualValue"} {
+		if strings.Contains(row.ValueJSON, forbidden) {
+			t.Fatalf("runtime settings contain removed metadata %q: %s", forbidden, row.ValueJSON)
+		}
 	}
-	if strings.Contains(row.ValueJSON, `"version"`) {
-		t.Fatalf("runtime settings contain version metadata: %s", row.ValueJSON)
+	// Persisted rows from before removal may still contain the obsolete secret.
+	// It must not require decryption or change any of the active configuration.
+	var oldPayload map[string]any
+	if err := json.Unmarshal([]byte(row.ValueJSON), &oldPayload); err != nil {
+		t.Fatal(err)
+	}
+	oldPayload["encryptedStatsigManualValue"] = "obsolete-ciphertext"
+	oldWeb := oldPayload["config"].(map[string]any)["ProviderWeb"].(map[string]any)
+	oldWeb["StatsigMode"] = "url"
+	oldWeb["StatsigSignerURL"] = "https://removed.example.com/sign"
+	oldJSON, err := json.Marshal(oldPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.db.WithContext(ctx).Model(&runtimeSettingsModel{}).Where("key = ?", runtimeSettingsKey).Update("value_json", string(oldJSON)).Error; err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, loadedRevision, found, err := repository.Get(ctx)
+	if err != nil || !found || loaded.ProviderWeb != settings.ProviderWeb || loaded.Routing != settings.Routing || loadedRevision != revision {
+		t.Fatalf("loading existing settings changed active values: %#v, revision=%d, err=%v", loaded, loadedRevision, err)
 	}
 	if _, _, err := repository.Save(ctx, settings, 0); !errors.Is(err, repositorypkg.ErrConflict) {
 		t.Fatalf("stale repository revision error = %v", err)

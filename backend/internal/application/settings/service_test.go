@@ -2,7 +2,6 @@ package settings
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -293,55 +292,6 @@ func TestUpdateRejectsInvalidDurationWithoutChangingConfig(t *testing.T) {
 	}
 	if service.Get().Config.Routing.StickyTTL != cfg.Routing.StickyTTL.String() || repository.found {
 		t.Fatal("invalid update changed or persisted runtime configuration")
-	}
-}
-
-func TestStatsigManualValueIsWriteOnlyAndClearedByURLMode(t *testing.T) {
-	cfg := testConfig(t)
-	repository := &runtimeSettingsRepositoryStub{}
-	service := NewService(cfg, time.Time{}, 0, repository, nil, nil)
-	manual := base64.RawStdEncoding.EncodeToString(make([]byte, 70))
-	input := service.Get().Config
-	input.ProviderWeb.StatsigMode = config.StatsigModeManual
-	input.ProviderWeb.StatsigManualValue = manual
-
-	snapshot, err := service.Update(context.Background(), service.Get().Revision, input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Config.ProviderWeb.StatsigManualValue != "" || !snapshot.Config.ProviderWeb.StatsigManualConfigured {
-		t.Fatalf("manual value leaked in snapshot: %#v", snapshot.Config.ProviderWeb)
-	}
-	if repository.value.ProviderWeb.StatsigManualValue != manual {
-		t.Fatal("manual value was not persisted")
-	}
-
-	keep := service.Get().Config
-	if _, err := service.Update(context.Background(), service.Get().Revision, keep); err != nil {
-		t.Fatalf("blank write-only value did not preserve existing value: %v", err)
-	}
-	if repository.value.ProviderWeb.StatsigManualValue != manual {
-		t.Fatal("blank write-only value cleared the existing manual value")
-	}
-
-	urlMode := service.Get().Config
-	urlMode.ProviderWeb.StatsigMode = config.StatsigModeURL
-	if _, err := service.Update(context.Background(), service.Get().Revision, urlMode); err != nil {
-		t.Fatal(err)
-	}
-	if repository.value.ProviderWeb.StatsigManualValue != "" {
-		t.Fatal("URL mode retained the manual x-statsig-id")
-	}
-}
-
-func TestLoadPersistedRejectsIncompleteStatsigPayload(t *testing.T) {
-	cfg := testConfig(t)
-	value := toDomainConfig(cfg)
-	value.ProviderWeb.StatsigMode = ""
-	value.ProviderWeb.StatsigSignerURL = ""
-	repository := &runtimeSettingsRepositoryStub{value: value, found: true}
-	if _, _, _, err := LoadPersisted(context.Background(), cfg, repository); err == nil {
-		t.Fatal("incomplete Statsig settings were accepted")
 	}
 }
 

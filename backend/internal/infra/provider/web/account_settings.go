@@ -69,7 +69,6 @@ func (a *Adapter) AcceptTerms(ctx context.Context, credential account.Credential
 			contentType: "application/json",
 			origin:      webBaseURL,
 			referer:     webBaseURL + "/",
-			statsig:     true,
 			clientHints: true,
 		},
 	)
@@ -91,7 +90,6 @@ func (a *Adapter) SetBirthDate(ctx context.Context, credential account.Credentia
 		contentType: "application/json",
 		origin:      baseURL,
 		referer:     baseURL + "/",
-		statsig:     true,
 	})
 	var upstreamErr *webAccountSettingError
 	if errors.As(err, &upstreamErr) && upstreamErr.birthDateAlreadySet {
@@ -112,7 +110,6 @@ func (a *Adapter) EnableNSFW(ctx context.Context, credential account.Credential)
 		origin:      baseURL,
 		referer:     baseURL + "/",
 		grpcWeb:     true,
-		statsig:     true,
 	})
 }
 
@@ -124,7 +121,6 @@ type webAccountSettingRequest struct {
 	referer     string
 	grpcWeb     bool
 	connectES   bool
-	statsig     bool
 	clientHints bool
 	withoutCF   bool
 }
@@ -158,64 +154,55 @@ func (a *Adapter) runWebAccountSettings(ctx context.Context, credential account.
 }
 
 func (a *Adapter) executeWebAccountSetting(ctx context.Context, token string, lease *infraegress.Lease, input webAccountSettingRequest) error {
-	for attempt := 0; attempt < 2; attempt++ {
-		requestCtx, cancel := context.WithTimeout(ctx, webAccountSettingTimeout)
-		request, requestErr := http.NewRequestWithContext(requestCtx, http.MethodPost, input.endpoint, bytes.NewReader(input.body))
-		if requestErr != nil {
-			cancel()
-			return requestErr
-		}
-		request.Header = buildHeaders(token, lease, input.contentType)
-		if input.withoutCF {
-			request.Header.Set("Cookie", infraegress.BuildSSOCookie(token, ""))
-		}
-		applyAppHeaders(request.Header, input.origin, input.referer)
-		if input.clientHints {
-			browserheaders.ApplyChromiumClientHints(request.Header, lease.UserAgent)
-		}
-		if input.grpcWeb {
-			request.Header.Set("x-grpc-web", "1")
-		}
-		if input.connectES {
-			request.Header.Set("x-user-agent", "connect-es/2.1.1")
-		}
-		if input.statsig {
-			a.applySignedStatsig(requestCtx, request, token, lease)
-		}
-
-		response, requestErr := lease.Do(request)
-		if requestErr != nil {
-			cancel()
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, requestErr)
-			return requestErr
-		}
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, webAccountSettingBodyLimit+1))
-		_ = response.Body.Close()
+	requestCtx, cancel := context.WithTimeout(ctx, webAccountSettingTimeout)
+	request, requestErr := http.NewRequestWithContext(requestCtx, http.MethodPost, input.endpoint, bytes.NewReader(input.body))
+	if requestErr != nil {
 		cancel()
-		if readErr != nil {
-			return readErr
-		}
-		if len(body) > webAccountSettingBodyLimit {
-			return fmt.Errorf("Grok Web 账号设置响应超过安全上限")
-		}
-		if response.StatusCode == http.StatusForbidden && input.statsig && attempt == 0 && a.invalidateSignedStatsig(http.MethodPost, input.endpoint) {
-			continue
-		}
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, nil)
-		if response.StatusCode == http.StatusUnauthorized {
-			return provider.ErrUnauthorized
-		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return newWebAccountSettingError(response.StatusCode, body)
-		}
-		if input.grpcWeb {
-			if err := validateAccountSettingGRPCStatus(response, body); err != nil {
-				return err
-			}
-		}
-		return nil
+		return requestErr
 	}
-	return fmt.Errorf("Grok Web Statsig 刷新后仍被拒绝")
+	request.Header = buildHeaders(token, lease, input.contentType)
+	if input.withoutCF {
+		request.Header.Set("Cookie", infraegress.BuildSSOCookie(token, ""))
+	}
+	applyAppHeaders(request.Header, input.origin, input.referer)
+	if input.clientHints {
+		browserheaders.ApplyChromiumClientHints(request.Header, lease.UserAgent)
+	}
+	if input.grpcWeb {
+		request.Header.Set("x-grpc-web", "1")
+	}
+	if input.connectES {
+		request.Header.Set("x-user-agent", "connect-es/2.1.1")
+	}
+
+	response, requestErr := lease.Do(request)
+	if requestErr != nil {
+		cancel()
+		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, requestErr)
+		return requestErr
+	}
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, webAccountSettingBodyLimit+1))
+	_ = response.Body.Close()
+	cancel()
+	if readErr != nil {
+		return readErr
+	}
+	if len(body) > webAccountSettingBodyLimit {
+		return fmt.Errorf("Grok Web 账号设置响应超过安全上限")
+	}
+	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, nil)
+	if response.StatusCode == http.StatusUnauthorized {
+		return provider.ErrUnauthorized
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return newWebAccountSettingError(response.StatusCode, body)
+	}
+	if input.grpcWeb {
+		if err := validateAccountSettingGRPCStatus(response, body); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateAccountSettingGRPCStatus(response *http.Response, body []byte) error {

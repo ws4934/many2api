@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -581,34 +580,6 @@ func TestValidateRejectsExampleSecrets(t *testing.T) {
 				t.Fatal("unsafe configuration was accepted")
 			}
 		})
-	}
-}
-
-func TestValidateStatsigModes(t *testing.T) {
-	base := defaultConfig()
-	base.Secrets.JWTSecret = "12345678901234567890123456789012"
-	base.Secrets.CredentialEncryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-
-	manual := base
-	manual.Provider.Web.StatsigMode = StatsigModeManual
-	manual.Provider.Web.StatsigManualValue = base64.RawStdEncoding.EncodeToString(make([]byte, 70))
-	if err := manual.Validate(); err != nil {
-		t.Fatalf("valid manual Statsig rejected: %v", err)
-	}
-	manual.Provider.Web.StatsigManualValue = "invalid"
-	if err := manual.Validate(); err == nil {
-		t.Fatal("invalid manual Statsig was accepted")
-	}
-
-	remote := base
-	remote.Provider.Web.StatsigMode = StatsigModeURL
-	remote.Provider.Web.StatsigSignerURL = "http://grok-signer-go:8788/sign"
-	if err := remote.Validate(); err != nil {
-		t.Fatalf("Docker internal Statsig signer rejected: %v", err)
-	}
-	remote.Provider.Web.StatsigSignerURL = "http://signer.example.com:8788/sign"
-	if err := remote.Validate(); err == nil {
-		t.Fatal("public plaintext Statsig signer URL was accepted")
 	}
 }
 
