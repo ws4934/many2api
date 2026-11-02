@@ -398,7 +398,7 @@ func TestChatImageUploadFeedsFileMetadataIntoConversation(t *testing.T) {
 			_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "conv_1"}}})
 			var item map[string]any
 			if err := connection.ReadJSON(&item); err != nil {
-				t.Errorf("read atomic response.create: %v", err)
+				t.Errorf("read conversation.item.create: %v", err)
 				return
 			}
 			itemEvent := item["event"].(map[string]any)
@@ -406,8 +406,9 @@ func TestChatImageUploadFeedsFileMetadataIntoConversation(t *testing.T) {
 			if len(attachments) != 1 || attachments[0] != "file_meta_1" {
 				t.Errorf("file_attachment_ids = %#v", itemEvent["file_attachment_ids"])
 			}
-			if itemEvent["type"] != "response.create" || itemEvent["item"] == nil {
-				t.Errorf("expected atomic response.create: %#v", itemEvent)
+			var create map[string]any
+			if err := connection.ReadJSON(&create); err != nil || create["event"].(map[string]any)["type"] != "response.create" {
+				t.Errorf("read response.create: value=%#v err=%v", create, err)
 				return
 			}
 			_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "response.chunk", "chunk": map[string]any{"text": map[string]any{"text": "seen", "channel": "CHANNEL_ASSISTANT_RESPONSE"}}}})
@@ -477,14 +478,15 @@ func TestForwardMessagesWebSearchEndToEnd(t *testing.T) {
 				_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "conv_1"}}})
 				var item map[string]any
 				if err := connection.ReadJSON(&item); err != nil {
-					t.Errorf("read atomic response.create: %v", err)
+					t.Errorf("read conversation.item.create: %v", err)
 					return
 				}
 				itemValue := item["event"].(map[string]any)["item"].(map[string]any)
 				chunks := itemValue["x_grok"].(map[string]any)["input_chunks"].([]any)
 				upstreamMessage, _ = chunks[len(chunks)-1].(map[string]any)["text"].(map[string]any)["text"].(string)
-				if item["event"].(map[string]any)["type"] != "response.create" {
-					t.Errorf("expected atomic response.create: %#v", item)
+				var create map[string]any
+				if err := connection.ReadJSON(&create); err != nil {
+					t.Errorf("read response.create: %v", err)
 					return
 				}
 				_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "response.search.result", "result": map[string]any{"url": "https://doc.rust-lang.org", "title": "The Rust Book"}}})
@@ -711,10 +713,12 @@ func TestLiteChatStreamFailsBeforeReturningSuccessResponse(t *testing.T) {
 		initialID := initial["event"].(map[string]any)["event_id"].(string)
 		_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "session.created", "client_event_id": initialID}})
 		_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "conv_1"}}})
-		var event map[string]any
-		if err := connection.ReadJSON(&event); err != nil || event["event"].(map[string]any)["type"] != "response.create" {
-			t.Errorf("read atomic response.create: value=%#v err=%v", event, err)
-			return
+		for range 2 {
+			var event map[string]any
+			if err := connection.ReadJSON(&event); err != nil {
+				t.Errorf("read turn event: %v", err)
+				return
+			}
 		}
 		_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "response.done", "response": map[string]any{"id": "parent_1", "status": "completed"}}})
 	}))
@@ -1799,10 +1803,8 @@ func TestWebStreamErrorsPenalizeEgressOnlyOnReadFailure(t *testing.T) {
 					initialID := initial["event"].(map[string]any)["event_id"].(string)
 					_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "session.created", "client_event_id": initialID}})
 					_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": map[string]any{"type": "conversation.attached", "conversation": map[string]any{"id": "conv_1"}}})
-					if err := connection.ReadJSON(&turn); err != nil || turn["event"].(map[string]any)["type"] != "response.create" {
-						t.Errorf("read atomic response.create: value=%#v err=%v", turn, err)
-						return
-					}
+					_ = connection.ReadJSON(&turn)
+					_ = connection.ReadJSON(&turn)
 					if test.final != nil {
 						_ = connection.WriteJSON(map[string]any{"session_id": "conv_1", "event": test.final})
 					}

@@ -48,14 +48,18 @@ func TestGatewaySessionSupportsNewAndExistingConversations(t *testing.T) {
 	}
 }
 
-func TestGatewayTurnCreateIsAtomicAndPreservesInputs(t *testing.T) {
+func TestGatewayTurnEventsOmitCastleAndPreserveAttachments(t *testing.T) {
 	previous := &inferencedomain.WebResponseState{UpstreamParentResponseID: "response-1"}
-	response := gatewayTurnEvent("conversation-1", "hello", []string{"file-1"}, previous)
-	event := response["event"].(map[string]any)
-	if response["session_id"] != "conversation-1" || event["type"] != "response.create" || event["item"] == nil || event["parent_response_id"] != "response-1" {
-		t.Fatalf("expected one response.create containing the message and parent: %#v", response)
+	item, response := gatewayTurnEvents("conversation-1", "hello", []string{"file-1"}, previous)
+	itemEvent := item["event"].(map[string]any)
+	if item["session_id"] != "conversation-1" || itemEvent["type"] != "conversation.item.create" || itemEvent["parent_response_id"] != "response-1" {
+		t.Fatalf("item event = %#v", item)
 	}
-	encoded, err := json.Marshal(response)
+	responseEvent := response["event"].(map[string]any)
+	if response["session_id"] != "conversation-1" || responseEvent["type"] != "response.create" || responseEvent["item"] != nil {
+		t.Fatalf("generation must follow the separate message event: %#v", response)
+	}
+	encoded, err := json.Marshal(item)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,30 +69,26 @@ func TestGatewayTurnCreateIsAtomicAndPreservesInputs(t *testing.T) {
 			t.Fatalf("item JSON %s missing %s", text, expected)
 		}
 	}
-	if strings.Contains(text, "castle_request_token") {
-		t.Fatalf("response.create unexpectedly contains Castle token: %s", text)
+	responseJSON, _ := json.Marshal(response)
+	if strings.Contains(string(responseJSON), "castle_request_token") {
+		t.Fatalf("response.create unexpectedly contains Castle token: %s", responseJSON)
 	}
 }
 
-func TestGatewayNewTurnHasNoParentOrAttachments(t *testing.T) {
-	response := gatewayTurnEvent("conversation-new", "你好", nil, nil)
-	event := response["event"].(map[string]any)
-	item := event["item"].(map[string]any)
-	if event["type"] != "response.create" || item["type"] != "message" || item["role"] != "user" {
-		t.Fatalf("new turn = %#v", response)
+func TestGatewayNewTurnKeepsMessageSeparateFromGeneration(t *testing.T) {
+	item, response := gatewayTurnEvents("conversation-new", "你好", nil, nil)
+	itemEvent := item["event"].(map[string]any)
+	message := itemEvent["item"].(map[string]any)
+	if itemEvent["type"] != "conversation.item.create" || message["role"] != "user" || itemEvent["parent_response_id"] != nil || itemEvent["file_attachment_ids"] != nil {
+		t.Fatalf("fresh message event = %#v", item)
 	}
-	for _, key := range []string{"parent_response_id", "file_attachment_ids"} {
-		if _, exists := event[key]; exists {
-			t.Fatalf("new turn contains unexpected %s: %#v", key, event)
-		}
+	chunks := message["x_grok"].(map[string]any)["input_chunks"].([]any)
+	if len(chunks) != 1 || chunks[0].(map[string]any)["text"].(map[string]any)["text"] != "你好" {
+		t.Fatalf("prompt was not delivered in the message: %#v", message)
 	}
-	if _, exists := item["file_attachment_ids"]; exists {
-		t.Fatalf("new message contains attachments: %#v", item)
-	}
-	xGrok := item["x_grok"].(map[string]any)
-	chunks := xGrok["input_chunks"].([]any)
-	if xGrok["client_message_id"] == "" || len(chunks) != 1 || chunks[0].(map[string]any)["text"].(map[string]any)["text"] != "你好" {
-		t.Fatalf("new message = %#v", item)
+	responseEvent := response["event"].(map[string]any)
+	if responseEvent["type"] != "response.create" || responseEvent["item"] != nil || responseEvent["parent_response_id"] != nil || responseEvent["file_attachment_ids"] != nil {
+		t.Fatalf("fresh generation event = %#v", response)
 	}
 }
 
