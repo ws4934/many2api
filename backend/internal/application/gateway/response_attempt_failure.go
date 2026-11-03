@@ -24,7 +24,7 @@ func (a *responseAttempt) canceledFailure(credential accountdomain.Credential, e
 // decides whether the request may move to another account.
 func (a *responseAttempt) handleForwardError(lease *accountLease, credential accountdomain.Credential, err error) attemptStep {
 	s, ctx := a.s, a.ctx
-	lease.Release()
+	defer lease.Release()
 	a.lastErr = err
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		a.lastFailure = a.canceledFailure(credential, err)
@@ -36,6 +36,14 @@ func (a *responseAttempt) handleForwardError(lease *accountLease, credential acc
 		return attemptNext
 	}
 	a.lastFailure = newTransportUpstreamFailure(err, credential.ID, credential.DisplayName())
+	if errors.Is(err, provider.ErrWebSearchPlaceholder) {
+		s.applyDegradedSearchPenalty(ctx, a.input.RequestID, credential, a.route.UpstreamModel)
+		s.recordResponseQualityFailure(ctx, a.auditBase, credential, Usage{}, a.startedAt, a.egressTrace, a.route.Provider, a.lastFailure.Code)
+		if a.ownership != nil || searchQualityRequestHasReplayUnsafeTools(a.input.Body) {
+			return attemptStop
+		}
+		return attemptNext
+	}
 	if !isRetryableTransportFailure(a.failurePolicy, err) {
 		return attemptStop
 	}

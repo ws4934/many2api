@@ -20,6 +20,9 @@ var (
 	// in a Cloudflare block cool-down; no upstream call was made.
 	ErrEgressBlocked       = errors.New("egress blocked by cloudflare, waiting for cool-down")
 	ErrBirthDateAlreadySet = errors.New("upstream birth date is already set")
+	// ErrWebSearchPlaceholder marks an accepted Web chat turn whose search
+	// queries match the upstream's known degraded-response signatures.
+	ErrWebSearchPlaceholder = errors.New("上游返回了异常搜索结果，请稍后重试")
 	// ErrVideoParameterInvalid and ErrVideoOperationUnsupported are wrapped by
 	// VideoRequestValidator rejections.
 	ErrVideoParameterInvalid     = errors.New("视频请求参数无效")

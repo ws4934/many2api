@@ -34,6 +34,7 @@ type degradeAccountRow struct {
 	Soft               int64            `gorm:"column:soft"`
 	Hard               int64            `gorm:"column:hard"`
 	Thinking           int64            `gorm:"column:thinking"`
+	Search             int64            `gorm:"column:search"`
 	Last               degradeTimestamp `gorm:"column:last_seen"`
 	Enabled            bool             `gorm:"column:enabled"`
 	Found              bool             `gorm:"column:found"`
@@ -148,6 +149,8 @@ func (r *AuditRepository) SummarizeDegrade(ctx context.Context, input repository
 				totals.Burst++
 			case audit.DegradeClassThinking:
 				totals.Thinking++
+			case audit.DegradeClassSearch:
+				totals.Search++
 			}
 			totals.MaxTPS = max(totals.MaxTPS, row.TPS)
 			name := degradeNodeName(row.NodeName)
@@ -166,7 +169,7 @@ func (r *AuditRepository) SummarizeDegrade(ctx context.Context, input repository
 			}
 			if row.BucketIndex >= 0 && row.BucketIndex < len(bucketCounts) {
 				bucketCounts[row.BucketIndex].Count++
-				if row.Class == audit.DegradeClassHard || row.Class == audit.DegradeClassBurst || row.Class == audit.DegradeClassThinking {
+				if row.Class == audit.DegradeClassHard || row.Class == audit.DegradeClassBurst || row.Class == audit.DegradeClassThinking || row.Class == audit.DegradeClassSearch {
 					bucketCounts[row.BucketIndex].Severe++
 				}
 			}
@@ -226,7 +229,7 @@ func (r *AuditRepository) SummarizeDegrade(ctx context.Context, input repository
 		for _, row := range accountRows {
 			result.Accounts = append(result.Accounts, repository.DegradeAccount{
 				ID: row.ID, Name: row.Name, Email: row.Email, Hits: row.Hits, MaxTPS: row.MaxTPS,
-				Burst: row.Burst, Soft: row.Soft, Hard: row.Hard, Thinking: row.Thinking, Last: time.Time(row.Last), Enabled: row.Enabled,
+				Burst: row.Burst, Soft: row.Soft, Hard: row.Hard, Thinking: row.Thinking, Search: row.Search, Last: time.Time(row.Last), Enabled: row.Enabled,
 				Found: row.Found, BuildBotFlagSource: row.BuildBotFlagSource,
 			})
 			accountIDs = append(accountIDs, row.ID)
@@ -244,6 +247,19 @@ func (r *AuditRepository) SummarizeDegrade(ctx context.Context, input repository
 				if account := accountsByID[row.AccountID]; account != nil {
 					cooldownUntil := time.Time(row.CooldownUntil).UTC()
 					account.LeaseCooldownUntil = &cooldownUntil
+				}
+			}
+			var modelRows []degradeAccountLeaseRow
+			if err := tx.Table("account_model_quota_blocks").
+				Select("account_id, MAX(cooldown_until) AS cooldown_until").
+				Where("account_id IN ? AND reason = ? AND cooldown_until > ?", accountIDs, audit.DegradeClassSearch, input.End).
+				Group("account_id").Scan(&modelRows).Error; err != nil {
+				return err
+			}
+			for _, row := range modelRows {
+				if account := accountsByID[row.AccountID]; account != nil {
+					until := time.Time(row.CooldownUntil).UTC()
+					account.ModelCooldownUntil = &until
 				}
 			}
 			// 行已按节点名排序，同一账号的同名节点相邻出现。
@@ -295,8 +311,8 @@ func (r *AuditRepository) degradeClassifiedQuery(tx *gorm.DB, input repository.D
 	// NULLIF keeps PostgreSQL safe even if its planner evaluates the throughput
 	// expression before the duration guard in the WHERE clause.
 	tpsExpression := fmt.Sprintf("(CAST(a.output_tokens AS %s) * 1000.0 / NULLIF(%s, 0))", castType, generationExpression)
-	selectTPS := fmt.Sprintf("CASE WHEN a.error_code = ? THEN 0 ELSE %s END", tpsExpression)
-	classExpression := fmt.Sprintf("CASE WHEN a.error_code = ? THEN ? WHEN ? AND %s < ? THEN ? WHEN %s >= ? THEN ? ELSE ? END", generationExpression, tpsExpression)
+	selectTPS := fmt.Sprintf("CASE WHEN a.error_code IN (?, ?) THEN 0 ELSE %s END", tpsExpression)
+	classExpression := fmt.Sprintf("CASE WHEN a.error_code = ? THEN ? WHEN a.error_code = ? THEN ? WHEN ? AND %s < ? THEN ? WHEN %s >= ? THEN ? ELSE ? END", generationExpression, tpsExpression)
 	speedPredicate := fmt.Sprintf(
 		"a.streaming = ? AND %s AND a.output_tokens >= ? AND a.first_token_ms IS NOT NULL AND a.duration_ms > a.first_token_ms AND %s >= ?",
 		auditSuccessPredicate, tpsExpression,
@@ -304,13 +320,14 @@ func (r *AuditRepository) degradeClassifiedQuery(tx *gorm.DB, input repository.D
 	thinkingPredicate := "a.streaming = ? AND a.error_code = ? AND a.status_code >= 200 AND a.status_code < 300"
 	query := tx.Table("request_audits AS a").
 		Select("a.id, a.request_id, a.account_id, a.account_name, a.egress_node_id, a.egress_node_name, a.output_tokens, a.created_at, a.model_upstream_model, "+selectTPS+" AS tps, "+classExpression+" AS degrade_class",
-			audit.ErrorQualityDegraded,
-			audit.ErrorQualityDegraded, audit.DegradeClassThinking, input.FailClosed, input.MinGenerationMS, audit.DegradeClassBurst, input.HardTPS, audit.DegradeClassHard, audit.DegradeClassSoft).
-		Where("a.provider = ?", "grok_build").
+			audit.ErrorQualityDegraded, audit.DegradeClassSearch,
+			audit.DegradeClassSearch, audit.DegradeClassSearch, audit.ErrorQualityDegraded, audit.DegradeClassThinking, input.FailClosed, input.MinGenerationMS, audit.DegradeClassBurst, input.HardTPS, audit.DegradeClassHard, audit.DegradeClassSoft).
 		Where("a.request_id NOT LIKE ?", "quality_%").
-		Where("(("+speedPredicate+") OR ("+thinkingPredicate+"))",
+		Where("((a.provider = ? AND (("+speedPredicate+") OR ("+thinkingPredicate+"))) OR (a.provider = ? AND a.error_code = ? AND a.status_code = ?))",
+			"grok_build",
 			true, input.MinOutputTokens, input.SoftTPS,
-			true, audit.ErrorQualityDegraded)
+			true, audit.ErrorQualityDegraded,
+			"grok_web", audit.DegradeClassSearch, 200)
 	if !input.Start.IsZero() {
 		query = query.Where("a.created_at >= ?", input.Start)
 	}
@@ -331,6 +348,7 @@ func (r *AuditRepository) degradeAccountAggregate(tx *gorm.DB, classified *gorm.
 			COALESCE(SUM(CASE WHEN d.degrade_class = 'soft_tps' THEN 1 ELSE 0 END), 0) AS soft,
 			COALESCE(SUM(CASE WHEN d.degrade_class = 'hard_tps' THEN 1 ELSE 0 END), 0) AS hard,
 			COALESCE(SUM(CASE WHEN d.degrade_class = 'missing_thinking' THEN 1 ELSE 0 END), 0) AS thinking,
+			COALESCE(SUM(CASE WHEN d.degrade_class = 'web_search_placeholder' THEN 1 ELSE 0 END), 0) AS search,
 			MAX(d.created_at) AS last_seen,
 			COALESCE(p.enabled, FALSE) AS enabled,
 			CASE WHEN p.id IS NULL THEN FALSE ELSE TRUE END AS found,

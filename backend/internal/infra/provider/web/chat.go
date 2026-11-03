@@ -136,6 +136,7 @@ type parsedChat struct {
 	// HostedSearchCalls are ordered web_search_call / x_search_call items (xAI Responses).
 	HostedSearchCalls []hostedSearchCall
 	hostedSearchByID  map[string]int
+	searchError       *degradedSearchError
 	// InlineCitations mirrors xAI default-on [[N]](url) embedding.
 	DisableInlineCitations bool
 	sourceKeys             map[string]struct{}
@@ -301,9 +302,9 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 			return &provider.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: streamHeaders(), Body: body}, nil
 		}
 		_ = upstream.Body.Close()
+		a.feedbackStreamError(ctx, lease, preflightErr)
 		lease.Release()
 		if errors.Is(preflightErr, errWebAntiBot) {
-			a.feedbackAntiBot(ctx, lease)
 			return antiBotProviderResponse(), nil
 		}
 		return nil, preflightErr
@@ -361,6 +362,10 @@ func (a *Adapter) feedbackStreamError(ctx context.Context, lease *infraegress.Le
 func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
 	reader := bufio.NewReaderSize(source, 64<<10)
 	var prefetched bytes.Buffer
+	parsed := &parsedChat{DisableInlineCitations: true}
+	replay := func() io.ReadCloser {
+		return &readerCloser{Reader: io.MultiReader(bytes.NewReader(prefetched.Bytes()), reader), closer: source}
+	}
 	for prefetched.Len() <= 1<<20 {
 		line, err := reader.ReadString('\n')
 		if line != "" {
@@ -370,19 +375,22 @@ func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
 				trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
 			}
 			if strings.HasPrefix(trimmed, "{") {
+				kind, delta, parseErr := parseUpstreamFrame([]byte(trimmed), parsed)
+				if parseErr != nil {
+					return nil, parseErr
+				}
+				// Session/search/reasoning frames do not establish a healthy
+				// answer. Hold them until the first visible answer or image so a
+				// degraded search can fail over before any client SSE is emitted.
+				if (kind == "text" || kind == "image") && strings.TrimSpace(delta) != "" {
+					return replay(), nil
+				}
 				var root map[string]any
 				if json.Unmarshal([]byte(trimmed), &root) == nil {
-					if errorValue, ok := root["error"].(map[string]any); ok {
-						return nil, webResponseError(errorValue)
-					}
 					if event, ok := root["event"].(map[string]any); ok {
-						if event["type"] == "error" {
-							return nil, gatewayEventError(event)
+						if event["type"] == "response.done" {
+							return replay(), nil
 						}
-						return &readerCloser{Reader: io.MultiReader(bytes.NewReader(prefetched.Bytes()), reader), closer: source}, nil
-					}
-					if result, ok := root["result"].(map[string]any); ok && (result["conversation"] != nil || result["response"] != nil) {
-						return &readerCloser{Reader: io.MultiReader(bytes.NewReader(prefetched.Bytes()), reader), closer: source}, nil
 					}
 				}
 			}
@@ -391,7 +399,7 @@ func preflightUpstream(source io.ReadCloser) (io.ReadCloser, error) {
 			if errors.Is(err, io.EOF) && prefetched.Len() > 0 {
 				return &readerCloser{Reader: bytes.NewReader(prefetched.Bytes()), closer: source}, nil
 			}
-			return nil, err
+			return nil, webStreamReadError{err}
 		}
 	}
 	return nil, fmt.Errorf("Grok Web 首个流事件超过安全检查上限")

@@ -8,6 +8,7 @@ import (
 
 	clientkeyapp "github.com/chenyme/grok2api/backend/internal/application/clientkey"
 	"github.com/chenyme/grok2api/backend/internal/application/gateway"
+	"github.com/chenyme/grok2api/backend/internal/domain/audit"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
@@ -144,6 +145,9 @@ func writeGatewayAnthropicError(c *gin.Context, err error) {
 		} else {
 			status, message = upstreamFailure.HTTPStatus, upstreamFailure.PublicMessage
 			errorType = anthropicUpstreamHTTPErrorType(status)
+			if upstreamFailure.Code == audit.DegradeClassSearch {
+				clientCode = upstreamFailure.Code
+			}
 			if upstreamFailure.Code == "upstream_header_timeout" {
 				errorType = "timeout_error"
 			}

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/chenyme/grok2api/backend/internal/domain/audit"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	neterrorpkg "github.com/chenyme/grok2api/backend/internal/pkg/neterror"
 )
@@ -264,6 +265,13 @@ func ProviderUpstreamFailure(err error, accountID uint64, accountName string) *U
 }
 
 func newTransportUpstreamFailure(err error, accountID uint64, accountName string) *UpstreamFailure {
+	if errors.Is(err, provider.ErrWebSearchPlaceholder) {
+		return &UpstreamFailure{
+			HTTPStatus: http.StatusBadGateway, Code: audit.DegradeClassSearch,
+			PublicMessage: provider.ErrWebSearchPlaceholder.Error(), AccountID: accountID, AccountName: accountName,
+			AccountScoped: true, Fingerprint: audit.DegradeClassSearch, Cause: err,
+		}
+	}
 	code, message := "upstream_network_error", "连接上游服务失败"
 	status := http.StatusBadGateway
 	if neterrorpkg.IsResponseHeaderTimeout(err) {

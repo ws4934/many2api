@@ -231,7 +231,7 @@ export function updateQualityGuardPolicy(policy: QualityGuardPolicy): Promise<{ 
 }
 
 export type DegradeWindow = "1h" | "6h" | "24h" | "7d";
-export type DegradeClass = "buffered_burst" | "soft_tps" | "hard_tps" | "missing_thinking";
+export type DegradeClass = "buffered_burst" | "soft_tps" | "hard_tps" | "missing_thinking" | "web_search_placeholder";
 
 export type DegradeAccountDTO = {
   id: string;
@@ -246,6 +246,7 @@ export type DegradeAccountDTO = {
   found: boolean;
   bfs: number;
   leaseQuarantinedUntil?: string;
+  modelQuarantinedUntil?: string;
 };
 
 export type DegradeEventDTO = {
@@ -265,7 +266,7 @@ export type DegradeSummaryDTO = {
   window: DegradeWindow;
   generatedAt: string;
   thresholds: { softTPS: number; hardTPS: number; minGenMs: number; minOutputTokens: number };
-  totals: { hits: number; accounts: number; stillEnabled: number; disabled: number; deleted: number; hard: number; soft: number; burst: number; thinking: number; maxTPS: number };
+  totals: { hits: number; accounts: number; stillEnabled: number; disabled: number; deleted: number; hard: number; soft: number; burst: number; thinking: number; search: number; maxTPS: number };
   series: { label: string; count: number; severe: number }[];
   nodes: { name: string; hits: number; accounts: number; maxTPS: number }[];
   accounts: DegradeAccountDTO[];
@@ -273,19 +274,20 @@ export type DegradeSummaryDTO = {
   events: DegradeEventDTO[];
 };
 
-const degradeClassValidator = isOneOf("buffered_burst", "soft_tps", "hard_tps", "missing_thinking");
+const degradeClassValidator = isOneOf("buffered_burst", "soft_tps", "hard_tps", "missing_thinking", "web_search_placeholder");
 
 const decodeDegradeSummary = createObjectDecoder<DegradeSummaryDTO>("degrade accounts", {
   window: isOneOf("1h", "6h", "24h", "7d"),
   generatedAt: isString,
   thresholds: hasShape({ softTPS: isNumber, hardTPS: isNumber, minGenMs: isNumber, minOutputTokens: isNumber }),
-  totals: hasShape({ hits: isNumber, accounts: isNumber, stillEnabled: isNumber, disabled: isNumber, deleted: isNumber, hard: isNumber, soft: isNumber, burst: isNumber, thinking: isNumber, maxTPS: isNumber }),
+  totals: hasShape({ hits: isNumber, accounts: isNumber, stillEnabled: isNumber, disabled: isNumber, deleted: isNumber, hard: isNumber, soft: isNumber, burst: isNumber, thinking: isNumber, search: isNumber, maxTPS: isNumber }),
   series: isArrayOf(hasShape({ label: isString, count: isNumber, severe: isNumber })),
   nodes: isArrayOf(hasShape({ name: isString, hits: isNumber, accounts: isNumber, maxTPS: isNumber })),
   accounts: isArrayOf(hasShape({
     id: isString, name: isString, email: isString, hits: isNumber, maxTPS: isNumber,
     classes: isObject, nodes: isArrayOf(isString), last: isString, enabled: isBoolean, found: isBoolean, bfs: isNumber,
     leaseQuarantinedUntil: isOptional(isString),
+    modelQuarantinedUntil: isOptional(isString),
   })),
   accountPage: hasShape({ page: isNumber, pageSize: isNumber, total: isNumber, hasMore: isBoolean }),
   events: isArrayOf(hasShape({

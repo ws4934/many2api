@@ -61,6 +61,7 @@ type DegradeTotals struct {
 	Soft         int64
 	Burst        int64
 	Thinking     int64
+	Search       int64
 	MaxTPS       float64
 }
 
@@ -97,6 +98,7 @@ type DegradeAccount struct {
 	Found              bool
 	BFS                int
 	LeaseCooldownUntil *time.Time
+	ModelCooldownUntil *time.Time
 }
 
 type DegradeEventView struct {
@@ -206,7 +208,7 @@ func normalizeDegradeAccountFilter(value DegradeAccountFilter) DegradeAccountFil
 	if value.Status != "enabled" && value.Status != "disabled" && value.Status != "deleted" {
 		value.Status = ""
 	}
-	if value.Class != auditdomain.DegradeClassBurst && value.Class != auditdomain.DegradeClassSoft && value.Class != auditdomain.DegradeClassHard && value.Class != auditdomain.DegradeClassThinking {
+	if value.Class != auditdomain.DegradeClassBurst && value.Class != auditdomain.DegradeClassSoft && value.Class != auditdomain.DegradeClassHard && value.Class != auditdomain.DegradeClassThinking && value.Class != auditdomain.DegradeClassSearch {
 		value.Class = ""
 	}
 	if value.MinHits < 1 {
@@ -231,9 +233,11 @@ func buildDegradeSummary(window string, now time.Time, thresholds DegradeThresho
 				auditdomain.DegradeClassSoft:     value.Soft,
 				auditdomain.DegradeClassHard:     value.Hard,
 				auditdomain.DegradeClassThinking: value.Thinking,
+				auditdomain.DegradeClassSearch:   value.Search,
 			},
 			Nodes: value.Nodes, Last: value.Last, Enabled: value.Enabled, Found: value.Found, BFS: value.BuildBotFlagSource,
 			LeaseCooldownUntil: value.LeaseCooldownUntil,
+			ModelCooldownUntil: value.ModelCooldownUntil,
 		})
 	}
 	nodes := make([]DegradeNode, 0, len(data.Nodes))
@@ -267,7 +271,7 @@ func buildDegradeSummary(window string, now time.Time, thresholds DegradeThresho
 		Totals: DegradeTotals{
 			Hits: data.Totals.Hits, Accounts: data.Totals.Accounts, StillEnabled: data.Totals.StillEnabled,
 			Disabled: data.Totals.Disabled, Deleted: data.Totals.Deleted, Hard: data.Totals.Hard,
-			Soft: data.Totals.Soft, Burst: data.Totals.Burst, Thinking: data.Totals.Thinking, MaxTPS: round(data.Totals.MaxTPS, 2),
+			Soft: data.Totals.Soft, Burst: data.Totals.Burst, Thinking: data.Totals.Thinking, Search: data.Totals.Search, MaxTPS: round(data.Totals.MaxTPS, 2),
 		},
 		Series: series, Nodes: nodes, Accounts: accounts,
 		AccountPage: DegradeAccountPage{

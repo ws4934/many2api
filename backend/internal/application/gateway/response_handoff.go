@@ -223,6 +223,9 @@ func (h *responseHandoff) settle(usage Usage, responseID, errorCode string) {
 	successful := auditRequestSucceeded(h.response.StatusCode, errorCode)
 	lease.completeSelectorObservation(successful)
 	budget := newFinalizationBudget(string(a.operation), string(route.Provider))
+	if errorCode == audit.DegradeClassSearch {
+		s.applyDegradedSearchPenalty(context.WithoutCancel(a.ctx), input.RequestID, credential, route.UpstreamModel)
+	}
 	if isUpstreamStreamFailure(errorCode) {
 		status, retryAfter := streamFailureHealthPenalty(errorCode, usage, s.qualityRetryConfig().IdleAccountCooldown)
 		if err := budget.run("account_health", finalizationHealthBudget, func(stageCtx context.Context) error {

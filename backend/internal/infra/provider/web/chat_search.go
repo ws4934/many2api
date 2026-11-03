@@ -161,6 +161,9 @@ func upsertHostedSearchCall(parsed *parsedChat, id, kind, query, status string) 
 	if parsed == nil {
 		return nil
 	}
+	if kind == "web_search" && isPlaceholderSearchQuery(query) && parsed.searchError == nil {
+		parsed.searchError = &degradedSearchError{query: query}
+	}
 	if id == "" {
 		// Some mgw tool_result frames omit tool_call_id. Correlate only when
 		// exactly one unfinished call of the same kind exists; otherwise keep

@@ -427,6 +427,12 @@ func parseGatewayEvent(event map[string]any, parsed *parsedChat) (string, string
 		if streamError, _ := output["stream_error"].(map[string]any); streamError != nil {
 			return "", "", webResponseError(streamError)
 		}
+		if card, _ := output["tool_usage_card"].(map[string]any); card != nil {
+			collectGatewayToolUsageCard(parsed, card)
+		}
+		if result, _ := output["tool_result"].(map[string]any); result != nil {
+			collectGatewayToolResult(parsed, result)
+		}
 		if rawURL := collectCardAttachment(parsed, output["card_attachment"]); rawURL != "" {
 			rawURL = absoluteAssetURL(rawURL)
 			parsed.Images = appendUniqueString(parsed.Images, rawURL)

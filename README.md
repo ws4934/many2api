@@ -295,6 +295,8 @@ Web uses a built-in catalog filtered by account tier; higher tiers inherit lower
 
 Chat and quota requests run natively in Go, without a Statsig signer or an additional browser/CDP service. Chat first sends the user message, attachments, and continuation parent in `conversation.item.create`, then starts generation with `response.create`. Optional Cloudflare clearance retains its existing configuration under Media & network.
 
+Chat inspects upstream search queries before forwarding the first answer. Known degraded-search placeholder queries reject the turn and cool the account/model pair for one hour; safe new conversations retry another account within the routing attempt limit. Explicitly selected accounts and stored-response continuations never switch accounts. If every attempt fails, the API returns HTTP 502 with code `web_search_placeholder` instead of the unrelated answer. A signature detected after streaming has started terminates that stream with a protocol error, without replaying it. The quality-guard account panel lists these failures and model cooldowns; this quarantine does not disable image/video routes on the same account.
+
 
 | Model                     | Type         | Minimum tier                   | Gateway surfaces                        |
 | ------------------------- | ------------ | ------------------------------ | --------------------------------------- |

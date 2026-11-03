@@ -560,7 +560,7 @@ type RoutingOverlaySnapshot struct {
 	Values      []RoutingAccountOverlay
 }
 
-// ModelQuotaBlock 表示账号的单模型配额暂不可用，不影响该账号上的其他模型。
+// ModelQuotaBlock 暂停账号的单个模型（配额、权限或响应质量），不影响其他模型。
 type ModelQuotaBlock struct {
 	AccountID     uint64
 	UpstreamModel string

@@ -85,7 +85,7 @@ export function DegradeAccountsPanel({ softTPS, hardTPS, failClosed, minGenMs }:
   return (
     <div className="space-y-4">
       <section className="grid overflow-hidden rounded-lg bg-card sm:grid-cols-2 xl:grid-cols-4" aria-label={t("qualityGuard.degrade.overview")}>
-        <Metric icon={AlertTriangle} label={t("qualityGuard.degrade.hits")} value={String(data.totals.hits)} detail={t("qualityGuard.degrade.hitsHelp", { burst: data.totals.burst, soft: data.totals.soft, hard: data.totals.hard, thinking: data.totals.thinking })} tone={data.totals.hits ? "bad" : "good"} />
+        <Metric icon={AlertTriangle} label={t("qualityGuard.degrade.hits")} value={String(data.totals.hits)} detail={t("qualityGuard.degrade.hitsHelp", { burst: data.totals.burst, soft: data.totals.soft, hard: data.totals.hard, thinking: data.totals.thinking, search: data.totals.search })} tone={data.totals.hits ? "bad" : "good"} />
         <Metric icon={Users} label={t("qualityGuard.degrade.accounts")} value={String(data.totals.accounts)} detail={t("qualityGuard.degrade.accountsHelp", { deleted: data.totals.deleted })} />
         <Metric icon={PowerOff} label={t("qualityGuard.degrade.stillEnabled")} value={String(data.totals.stillEnabled)} detail={t("qualityGuard.degrade.stillEnabledHelp")} tone={data.totals.stillEnabled ? "bad" : "good"} />
         <Metric icon={Gauge} label={t("qualityGuard.degrade.maxTPS")} value={Math.round(data.totals.maxTPS).toString()} detail={t("qualityGuard.degrade.maxTPSHelp")} tone={data.totals.maxTPS >= data.thresholds.hardTPS ? "bad" : undefined} />
@@ -113,7 +113,7 @@ export function DegradeAccountsPanel({ softTPS, hardTPS, failClosed, minGenMs }:
             </div>
             <FilterSelect value={period} onChange={(value) => { setSelected(new Set()); setPage(1); setPeriod(value as DegradeWindow); }} items={[["1h", t("qualityGuard.degrade.windows.1h")], ["6h", t("qualityGuard.degrade.windows.6h")], ["24h", t("qualityGuard.degrade.windows.24h")], ["7d", t("qualityGuard.degrade.windows.7d")]]} />
             <FilterSelect value={status} onChange={(value) => { setStatus(value as "all" | "enabled" | "disabled" | "deleted"); setPage(1); setSelected(new Set()); }} items={[["all", t("qualityGuard.degrade.statusAll")], ["enabled", t("qualityGuard.degrade.statusOn")], ["disabled", t("qualityGuard.degrade.statusOff")], ["deleted", t("qualityGuard.degrade.statusDeleted")]]} />
-            <FilterSelect value={cls} onChange={(value) => { setCls(value as "all" | DegradeClass); setPage(1); setSelected(new Set()); }} items={[["all", t("qualityGuard.degrade.classAll")], ["missing_thinking", t("qualityGuard.degrade.classThinking")], ["buffered_burst", "burst"], ["soft_tps", "soft"], ["hard_tps", "hard"]]} />
+            <FilterSelect value={cls} onChange={(value) => { setCls(value as "all" | DegradeClass); setPage(1); setSelected(new Set()); }} items={[["all", t("qualityGuard.degrade.classAll")], ["web_search_placeholder", t("qualityGuard.degrade.classSearch")], ["missing_thinking", t("qualityGuard.degrade.classThinking")], ["buffered_burst", "burst"], ["soft_tps", "soft"], ["hard_tps", "hard"]]} />
             <FilterSelect value={String(hitsMin)} onChange={(value) => { setHitsMin(Number(value)); setPage(1); setSelected(new Set()); }} items={[["1", t("qualityGuard.degrade.hitsAll")], ["2", t("qualityGuard.degrade.hitsMin", { count: 2 })], ["3", t("qualityGuard.degrade.hitsMin", { count: 3 })], ["5", t("qualityGuard.degrade.hitsMin", { count: 5 })], ["10", t("qualityGuard.degrade.hitsMin", { count: 10 })]]} />
             <Button type="button" variant="secondary" size="sm" className="bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive" disabled={selectedRows.length === 0 || busy} onClick={() => {
               if (!window.confirm(t("qualityGuard.degrade.muteConfirm", { count: selectedRows.length }))) return;
@@ -172,6 +172,8 @@ export function DegradeAccountsPanel({ softTPS, hardTPS, failClosed, minGenMs }:
                     <TableCell className="whitespace-nowrap">
                       {!account.found
                         ? <Badge variant="outline" className="whitespace-nowrap text-muted-foreground">{t("qualityGuard.degrade.deletedStatus")}</Badge>
+                        : account.modelQuarantinedUntil
+                          ? <Badge variant="outline" className="whitespace-nowrap border-amber-500/40 text-amber-700 dark:text-amber-400">{t("qualityGuard.degrade.modelUntil", { time: formatCompactDateTime(account.modelQuarantinedUntil, i18n.language) })}</Badge>
                         : account.leaseQuarantinedUntil
                           ? <Badge variant="outline" className="whitespace-nowrap border-amber-500/40 text-amber-700 dark:text-amber-400">{t("qualityGuard.leaseUntil", { time: formatCompactDateTime(account.leaseQuarantinedUntil, i18n.language) })}</Badge>
                         : account.enabled
@@ -181,7 +183,7 @@ export function DegradeAccountsPanel({ softTPS, hardTPS, failClosed, minGenMs }:
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{account.hits}</TableCell>
                     <TableCell className={cn("text-right font-mono tabular-nums", account.maxTPS >= data.thresholds.hardTPS ? "text-destructive" : account.maxTPS >= data.thresholds.softTPS ? "text-amber-600 dark:text-amber-400" : "")}>{account.maxTPS}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{classSummary(account.classes)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{classSummary(account.classes, t("qualityGuard.degrade.classSearch"))}</TableCell>
                     <TableCell className="text-xs">{account.nodes.join(" · ") || "-"}</TableCell>
                     <TableCell className="font-mono text-xs">{account.last ? formatCompactDateTime(account.last, i18n.language) : "-"}</TableCell>
                   </TableRow>
@@ -213,8 +215,8 @@ export function DegradeAccountsPanel({ softTPS, hardTPS, failClosed, minGenMs }:
           {data.events.length === 0 ? <EmptyState message={t("qualityGuard.degrade.noEvents")} /> : data.events.map((event) => (
             <div key={event.id} className="grid grid-cols-[7.5rem_minmax(0,1fr)_auto] gap-3 border-b px-4 py-2 last:border-b-0 sm:px-5">
               <div className="font-mono text-[11px] text-muted-foreground">{formatCompactDateTime(event.createdAt, i18n.language)}</div>
-              <div className="truncate text-xs">#{event.accountId ?? "-"} {event.accountName} · {event.nodeName} · out {event.outputTokens} · {event.requestId}</div>
-              <div className="flex items-center gap-2">{classBadge(event.class)}<span className="font-mono text-xs tabular-nums">{event.tps}</span></div>
+              <div className="truncate text-xs">#{event.accountId ?? "-"} {event.accountName} · {event.model} · {event.nodeName} · out {event.outputTokens} · {event.requestId}</div>
+              <div className="flex items-center gap-2">{classBadge(event.class, t("qualityGuard.degrade.classSearch"))}<span className="font-mono text-xs tabular-nums">{event.tps}</span></div>
             </div>
           ))}
         </div>
@@ -223,8 +225,9 @@ export function DegradeAccountsPanel({ softTPS, hardTPS, failClosed, minGenMs }:
   );
 }
 
-function classSummary(classes: DegradeAccountDTO["classes"]) {
+function classSummary(classes: DegradeAccountDTO["classes"], searchLabel: string) {
   return [
+    classes.web_search_placeholder ? `${searchLabel} ${classes.web_search_placeholder}` : "",
     classes.missing_thinking ? `thinking ${classes.missing_thinking}` : "",
     classes.buffered_burst ? `burst ${classes.buffered_burst}` : "",
     classes.soft_tps ? `soft ${classes.soft_tps}` : "",
@@ -232,7 +235,8 @@ function classSummary(classes: DegradeAccountDTO["classes"]) {
   ].filter(Boolean).join(" · ") || "-";
 }
 
-function classBadge(cls: DegradeClass) {
+function classBadge(cls: DegradeClass, searchLabel: string) {
+  if (cls === "web_search_placeholder") return <Badge variant="outline" className="text-destructive">{searchLabel}</Badge>;
   if (cls === "missing_thinking") return <Badge variant="outline" className="text-destructive">thinking</Badge>;
   if (cls === "hard_tps") return <Badge variant="outline" className="text-destructive">hard</Badge>;
   if (cls === "buffered_burst") return <Badge variant="outline" className="text-amber-600 dark:text-amber-400">burst</Badge>;
@@ -255,7 +259,7 @@ function Metric({ icon: Icon, label, value, detail, tone }: { icon: typeof Alert
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="mt-1 truncate text-lg font-medium tabular-nums">{value}</p>
-        <p className="mt-1 truncate text-[11px] text-muted-foreground">{detail}</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{detail}</p>
       </div>
     </div>
   );

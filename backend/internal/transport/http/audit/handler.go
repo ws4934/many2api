@@ -477,6 +477,7 @@ func (h *Handler) degradeAccounts(c *gin.Context) {
 			ID: strconv.FormatUint(account.ID, 10), Name: account.Name, Email: account.Email, Hits: account.Hits,
 			MaxTPS: account.MaxTPS, Classes: account.Classes, Nodes: account.Nodes, Last: account.Last,
 			Enabled: account.Enabled, Found: account.Found, BFS: account.BFS, LeaseCooldownUntil: account.LeaseCooldownUntil,
+			ModelCooldownUntil: account.ModelCooldownUntil,
 		})
 	}
 	events := make([]degradeEventResponse, 0, len(result.Events))
@@ -498,7 +499,7 @@ func (h *Handler) degradeAccounts(c *gin.Context) {
 		Totals: degradeTotalsResponse{
 			Hits: result.Totals.Hits, Accounts: result.Totals.Accounts, StillEnabled: result.Totals.StillEnabled,
 			Disabled: result.Totals.Disabled, Deleted: result.Totals.Deleted, Hard: result.Totals.Hard,
-			Soft: result.Totals.Soft, Burst: result.Totals.Burst, Thinking: result.Totals.Thinking, MaxTPS: result.Totals.MaxTPS,
+			Soft: result.Totals.Soft, Burst: result.Totals.Burst, Thinking: result.Totals.Thinking, Search: result.Totals.Search, MaxTPS: result.Totals.MaxTPS,
 		},
 		Series: result.Series, Nodes: result.Nodes, Accounts: accounts,
 		AccountPage: degradeAccountPageResponse{
@@ -545,6 +546,7 @@ type degradeTotalsResponse struct {
 	Soft         int64   `json:"soft"`
 	Burst        int64   `json:"burst"`
 	Thinking     int64   `json:"thinking"`
+	Search       int64   `json:"search"`
 	MaxTPS       float64 `json:"maxTPS"`
 }
 
@@ -561,6 +563,7 @@ type degradeAccountResponse struct {
 	Found              bool             `json:"found"`
 	BFS                int              `json:"bfs"`
 	LeaseCooldownUntil *time.Time       `json:"leaseQuarantinedUntil,omitempty"`
+	ModelCooldownUntil *time.Time       `json:"modelQuarantinedUntil,omitempty"`
 }
 
 type degradeEventResponse struct {

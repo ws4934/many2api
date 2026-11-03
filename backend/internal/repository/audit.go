@@ -63,6 +63,7 @@ type DegradeTotals struct {
 	Soft         int64
 	Burst        int64
 	Thinking     int64
+	Search       int64
 	MaxTPS       float64
 }
 
@@ -76,11 +77,13 @@ type DegradeAccount struct {
 	Soft               int64
 	Hard               int64
 	Thinking           int64
+	Search             int64
 	Last               time.Time
 	Enabled            bool
 	Found              bool
 	BuildBotFlagSource int
 	LeaseCooldownUntil *time.Time
+	ModelCooldownUntil *time.Time
 	Nodes              []string
 }
 

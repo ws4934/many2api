@@ -5,6 +5,7 @@ const (
 	DegradeClassSoft     = "soft_tps"
 	DegradeClassHard     = "hard_tps"
 	DegradeClassThinking = "missing_thinking"
+	DegradeClassSearch   = "web_search_placeholder"
 	ErrorQualityDegraded = "quality_degraded"
 )
 

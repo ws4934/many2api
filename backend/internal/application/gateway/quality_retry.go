@@ -478,11 +478,21 @@ func canReplayQualityHoldAcrossAccounts(input Input, ownership *inferencedomain.
 }
 
 func qualityRequestHasReplayUnsafeHostedTools(body []byte) bool {
+	return requestHasReplayUnsafeHostedTools(body, false)
+}
+
+// Search-only tools are read-only. Allow them specifically for a rejected
+// Web search turn; the existing Build quality-retry contract stays unchanged.
+func searchQualityRequestHasReplayUnsafeTools(body []byte) bool {
+	return requestHasReplayUnsafeHostedTools(body, true)
+}
+
+func requestHasReplayUnsafeHostedTools(body []byte, allowSearch bool) bool {
 	var payload map[string]any
 	if json.Unmarshal(body, &payload) != nil || payload == nil {
 		return false
 	}
-	if raw, exists := payload["web_search_options"]; exists && raw != nil {
+	if raw, exists := payload["web_search_options"]; exists && raw != nil && !allowSearch {
 		return true
 	}
 	if raw, exists := payload["mcp_servers"]; exists && raw != nil {
@@ -491,7 +501,7 @@ func qualityRequestHasReplayUnsafeHostedTools(body []byte) bool {
 			return true
 		}
 	}
-	if qualityToolListHasReplayUnsafeHostedTool(payload["tools"]) {
+	if qualityToolListHasReplayUnsafeHostedTool(payload["tools"], allowSearch) {
 		return true
 	}
 	// Responses Tool Search can load declarations later in the request. Only
@@ -503,14 +513,14 @@ func qualityRequestHasReplayUnsafeHostedTools(body []byte) bool {
 		if !ok || jsonNodeString(item["type"]) != "additional_tools" {
 			continue
 		}
-		if qualityToolListHasReplayUnsafeHostedTool(item["tools"]) {
+		if qualityToolListHasReplayUnsafeHostedTool(item["tools"], allowSearch) {
 			return true
 		}
 	}
 	return false
 }
 
-func qualityToolListHasReplayUnsafeHostedTool(value any) bool {
+func qualityToolListHasReplayUnsafeHostedTool(value any, allowSearch bool) bool {
 	tools, ok := value.([]any)
 	if !ok {
 		return false
@@ -532,7 +542,11 @@ func qualityToolListHasReplayUnsafeHostedTool(value any) bool {
 				return true
 			}
 		case "namespace":
-			if qualityToolListHasReplayUnsafeHostedTool(tool["tools"]) {
+			if qualityToolListHasReplayUnsafeHostedTool(tool["tools"], allowSearch) {
+				return true
+			}
+		case "web_search", "web_search_preview", "web_search_20250305", "x_search":
+			if !allowSearch {
 				return true
 			}
 		default:
@@ -617,13 +631,17 @@ func (s *Service) applyOutputSpeedPenalty(ctx context.Context, record audit.Reco
 }
 
 func (s *Service) recordQualityDegraded(ctx context.Context, base audit.Record, credential accountdomain.Credential, usage Usage, startedAt time.Time, trace *infraegress.Trace, provider accountdomain.Provider) {
+	s.recordResponseQualityFailure(ctx, base, credential, usage, startedAt, trace, provider, ErrorQualityDegraded)
+}
+
+func (s *Service) recordResponseQualityFailure(ctx context.Context, base audit.Record, credential accountdomain.Credential, usage Usage, startedAt time.Time, trace *infraegress.Trace, provider accountdomain.Provider, code string) {
 	record := base
 	record.EventID = newAuditEventID()
 	accountID := credential.ID
 	record.AccountID = &accountID
 	record.AccountName = credential.DisplayName()
 	record.StatusCode = http.StatusOK
-	record.ErrorCode = ErrorQualityDegraded
+	record.ErrorCode = code
 	record.OutputTokens = usage.OutputTokens
 	record.ReasoningTokens = usage.ReasoningTokens
 	record.TotalTokens = usage.TotalTokens

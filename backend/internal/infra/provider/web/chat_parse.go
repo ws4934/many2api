@@ -105,6 +105,18 @@ func consumeJSONObjects(source io.Reader, maxObjectBytes int, consume func([]byt
 }
 
 func parseUpstreamFrame(data []byte, parsed *parsedChat) (string, string, error) {
+	kind, delta, err := parseUpstreamObject(data, parsed)
+	if parsed.searchError != nil {
+		if parsed.searchError.frame == nil {
+			parsed.searchError.frame = append([]byte(nil), data[:min(len(data), provider.MaxDiagnosticBodyBytes)]...)
+			parsed.searchError.truncated = len(data) > provider.MaxDiagnosticBodyBytes
+		}
+		return "", "", parsed.searchError
+	}
+	return kind, delta, err
+}
+
+func parseUpstreamObject(data []byte, parsed *parsedChat) (string, string, error) {
 	var root map[string]any
 	if json.Unmarshal(data, &root) != nil {
 		return "", "", nil

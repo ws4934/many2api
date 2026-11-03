@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chenyme/grok2api/backend/internal/application/gateway"
+	"github.com/chenyme/grok2api/backend/internal/domain/audit"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/pkg/neterror"
 	"github.com/gin-gonic/gin"
@@ -274,6 +275,8 @@ func classifyCopyError(ctx context.Context, err error) string {
 		return "client_stream_interrupted"
 	}
 	switch {
+	case errors.Is(err, provider.ErrWebSearchPlaceholder):
+		return audit.DegradeClassSearch
 	case errors.Is(err, errResponseTransferLimit):
 		return "response_too_large"
 	case errors.Is(err, errUpstreamStreamFailed):
@@ -444,6 +447,8 @@ func writeStreamAbortTrailer(writer gin.ResponseWriter, protocol streamProtocol,
 func streamAbortTrailer(protocol streamProtocol, cause error, meta responseMetadata, compat *responsesCompatState) []byte {
 	code, message := "upstream_stream_interrupted", "上游流式响应中断"
 	switch {
+	case errors.Is(cause, provider.ErrWebSearchPlaceholder):
+		code, message = audit.DegradeClassSearch, provider.ErrWebSearchPlaceholder.Error()
 	case errors.Is(cause, neterror.ErrUpstreamStreamIdleTimeout):
 		code, message = "upstream_stream_idle_timeout", "上游流式响应长时间无数据"
 	case errors.Is(cause, neterror.ErrUpstreamOutputLoop):
@@ -506,7 +511,7 @@ func streamAbortTrailer(protocol streamProtocol, cause error, meta responseMetad
 		return []byte("event: response.failed\ndata: " + string(payload) + "\n\n")
 	case streamProtocolAnthropic:
 		anthropicMessage := message
-		if code == "upstream_output_loop" {
+		if code == "upstream_output_loop" || code == audit.DegradeClassSearch {
 			anthropicMessage = code + ": " + message
 		}
 		payload, err := json.Marshal(map[string]any{
