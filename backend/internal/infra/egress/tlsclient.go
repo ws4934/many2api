@@ -243,7 +243,7 @@ func browserProfile(userAgent string) profiles.ClientProfile {
 }
 
 func (c *browserClient) Do(request *http.Request) (*http.Response, error) {
-	frequest, err := toFHTTPRequest(request)
+	frequest, err := ToFHTTPRequest(request)
 	if err != nil {
 		return nil, err
 	}
@@ -251,11 +251,14 @@ func (c *browserClient) Do(request *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	return fromFHTTPResponse(fresponse), nil
+	return FromFHTTPResponse(fresponse), nil
 }
 
-func fromFHTTPResponse(fresponse *fhttp.Response) *http.Response {
+// FromFHTTPResponse converts wire framing without losing trailers populated at EOF.
+func FromFHTTPResponse(fresponse *fhttp.Response) *http.Response {
 	header := http.Header(fresponse.Header).Clone()
+	delete(header, fhttp.HeaderOrderKey)
+	delete(header, fhttp.PHeaderOrderKey)
 	contentLength := fresponse.ContentLength
 	if fresponse.Uncompressed {
 		header.Del("Content-Encoding")
@@ -263,10 +266,14 @@ func fromFHTTPResponse(fresponse *fhttp.Response) *http.Response {
 		contentLength = -1
 	}
 	transferEncoding := append([]string(nil), fresponse.TransferEncoding...)
+	body := fresponse.Body
+	if body == nil {
+		body = http.NoBody
+	}
 	return &http.Response{
 		Status: fresponse.Status, StatusCode: fresponse.StatusCode, Proto: fresponse.Proto,
 		ProtoMajor: fresponse.ProtoMajor, ProtoMinor: fresponse.ProtoMinor, Header: header,
-		Body: fresponse.Body, ContentLength: contentLength, TransferEncoding: transferEncoding,
+		Body: body, ContentLength: contentLength, TransferEncoding: transferEncoding,
 		// fhttp 在读取 Body 到 EOF 时原地填充 Trailer，因此这里必须保留共享 map。
 		Close: fresponse.Close, Uncompressed: fresponse.Uncompressed, Trailer: http.Header(fresponse.Trailer),
 	}
@@ -278,7 +285,9 @@ func (c *browserClient) CloseIdleConnections() {
 	}
 }
 
-func toFHTTPRequest(request *http.Request) (*fhttp.Request, error) {
+// ToFHTTPRequest preserves request framing and replayable bodies; callers set
+// provider-specific browser header order after conversion.
+func ToFHTTPRequest(request *http.Request) (*fhttp.Request, error) {
 	var body io.Reader
 	if request.Body != nil {
 		body = request.Body

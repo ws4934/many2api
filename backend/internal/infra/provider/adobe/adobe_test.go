@@ -427,6 +427,7 @@ func TestVideoRemintFailureCreatesNothing(t *testing.T) {
 	fake.mintDown, fake.submitStatus = true, http.StatusRequestTimeout
 	endpoints.videoSubmit = fake.URL + "/generate-async"
 	adapter.sherlock.token, adapter.sherlock.mintedAt = validSherlockToken(), time.Now() // 首次提交用缓存
+	adapter.sherlock.source = adapter.sherlock.mintBase()
 	var saved []string
 	_, err := adapter.GenerateVideo(context.Background(), provider.VideoRequest{
 		Credential: credential, Model: "veo/3.1-generate", Prompt: "cat",

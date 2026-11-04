@@ -118,10 +118,9 @@ func (a *Adapter) userAgentOf(credential account.Credential) string {
 
 // report 把一次结果反馈给出口健康度：传输失败归咎于出口节点，上游状态码不算。
 func (a *Adapter) report(ctx context.Context, lease *infraegress.Lease, err error) {
-	if provider.IsMediaPostProcessingError(err) {
+	if ctx.Err() != nil || provider.IsMediaPostProcessingError(err) {
 		return // Local storage and direct CDN failures are not API-proxy failures.
 	}
-	ctx = context.WithoutCancel(ctx)
 	var transport *transportError
 	switch {
 	case err == nil:

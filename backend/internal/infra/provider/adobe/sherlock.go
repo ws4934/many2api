@@ -37,8 +37,10 @@ type sherlockService struct {
 
 	mu       sync.Mutex
 	token    string
+	source   string // normalized mint service URL that supplied the cache
 	mintedAt time.Time
-	// loadedFrom 是当前 token 那次拉取的开始时间；更早开始的拉取不得覆盖它。
+	// loadedFrom orders ordinary fetches by start time and forced remints by
+	// completion time, so an overlapping cached fetch cannot replace a fresh token.
 	loadedFrom time.Time
 	// triedAt 是最近一次后台刷新的开始时间。
 	triedAt time.Time
@@ -51,8 +53,15 @@ func newSherlockService(cfg func() Config) *sherlockService {
 // current 返回一枚可用 token。超过刷新周期但仍在有效期内时立即返回缓存并在后台
 // 刷新，提交不必等浏览器铸造；没有有效缓存时才同步拉取。
 func (s *sherlockService) current(ctx context.Context) (string, error) {
+	base := s.mintBase()
+	if base == "" {
+		return "", errNoSherlockSource
+	}
 	s.mu.Lock()
 	token, age := s.token, time.Since(s.mintedAt)
+	if s.source != base {
+		token = ""
+	}
 	refresh := token != "" && age >= sherlockRefresh && age < sherlockTTL && time.Since(s.triedAt) >= mintRetryGap
 	if refresh {
 		s.triedAt = time.Now()
@@ -75,7 +84,7 @@ func (s *sherlockService) forceMint(ctx context.Context) (string, error) {
 // mint 是共享加载：同类调用合并成一次，调用方离开不会取消它。fresh 用独立的
 // key，避免强制刷新拿到正在进行的普通拉取（可能是 sidecar 缓存的旧 token）。
 func (s *sherlockService) mint(ctx context.Context, fresh bool) (string, error) {
-	base := strings.TrimRight(strings.TrimSpace(s.cfg().SherlockMintAPI), "/")
+	base := s.mintBase()
 	if base == "" {
 		return "", errNoSherlockSource
 	}
@@ -83,20 +92,29 @@ func (s *sherlockService) mint(ctx context.Context, fresh bool) (string, error) 
 	if fresh {
 		key, endpoint = "fresh", endpoint+"?fresh=1"
 	}
-	return flight.Do(ctx, &s.flight, key, mintTimeout, func(ctx context.Context) (string, error) {
+	return flight.Do(ctx, &s.flight, base+"/"+key, mintTimeout, func(ctx context.Context) (string, error) {
 		started := time.Now()
 		value, err := fetchSherlock(ctx, s.client, endpoint)
 		if err != nil {
 			return "", err
 		}
+		if fresh {
+			started = time.Now()
+		}
 		s.mu.Lock()
-		// 普通拉取可能晚于强制重铸返回（拿的是 sidecar 缓存的旧 token），不能覆盖新的。
-		if started.After(s.loadedFrom) {
+		// A forced remint is newer than every cached fetch that began before
+		// it finished, regardless of their response arrival order.
+		if base == s.mintBase() && (s.source != base || started.After(s.loadedFrom)) {
+			s.source = base
 			s.token, s.mintedAt, s.loadedFrom = value, time.Now(), started
 		}
 		s.mu.Unlock()
 		return value, nil
 	})
+}
+
+func (s *sherlockService) mintBase() string {
+	return strings.TrimRight(strings.TrimSpace(s.cfg().SherlockMintAPI), "/")
 }
 
 // TestMint 按提交时的方式向 base 处的 mint 服务要一枚 token，供管理端测试未保存的
@@ -124,7 +142,10 @@ func fetchSherlock(ctx context.Context, client *http.Client, endpoint string) (s
 		return "", err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
 	var body struct {
 		Token string `json:"token"`
 		Error string `json:"error"`

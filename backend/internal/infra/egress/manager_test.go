@@ -722,7 +722,7 @@ func TestBrowserRequestLeavesHeaderOrderingToTLSProfile(t *testing.T) {
 	}
 	request.Header.Set("User-Agent", DefaultUserAgent)
 	request.Header.Set("Accept", "*/*")
-	converted, err := toFHTTPRequest(request)
+	converted, err := ToFHTTPRequest(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3037,5 +3037,25 @@ func TestSharedNodeLoadSurvivesFirstCallerCancel(t *testing.T) {
 	}
 	if len(followerNodes) != 1 || followerNodes[0].ID != 1 {
 		t.Fatalf("follower nodes = %#v", followerNodes)
+	}
+}
+
+func TestExpiredCallerDoesNotCoolEgress(t *testing.T) {
+	for _, scope := range []domain.Scope{domain.ScopeWeb, domain.ScopeConsole, "chatgpt", "adobe"} {
+		t.Run(string(scope), func(t *testing.T) {
+			repository := &mutableEgressRepository{node: domain.Node{ID: 1, Scope: scope, Enabled: true, Health: 1}}
+			manager := NewManager(repository, nil)
+			ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+			defer cancel()
+			manager.FeedbackForScope(ctx, scope, 1, 0, fmt.Errorf("request deadline: %w", ctx.Err()))
+			if repository.updates != 0 || repository.node.CooldownUntil != nil {
+				t.Fatal("caller deadline penalized the proxy")
+			}
+			// A transport's own deadline is still a network failure with a live caller.
+			manager.FeedbackForScope(t.Context(), scope, 1, 0, context.DeadlineExceeded)
+			if repository.updates == 0 || repository.node.CooldownUntil == nil {
+				t.Fatal("real transport deadline was ignored")
+			}
+		})
 	}
 }

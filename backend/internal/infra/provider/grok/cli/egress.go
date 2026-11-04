@@ -17,7 +17,17 @@ type egressTransport struct {
 	fallback http.RoundTripper
 }
 
-func (t *egressTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+func (t *egressTransport) RoundTrip(request *http.Request) (response *http.Response, err error) {
+	idleRequest := t.withStreamIdleContext(request)
+	defer func() {
+		// A body wrapper owns cancellation after a successful handoff. Failed
+		// requests and bodyless responses have no wrapper to release it.
+		if err != nil || response == nil || response.Body == nil {
+			if _, cancel := idleCancelFrom(idleRequest.Context()); cancel != nil {
+				cancel(nil)
+			}
+		}
+	}()
 	affinity := infraegress.AccountFromContext(request.Context())
 	if affinity == "" {
 		affinity = "bootstrap"
@@ -36,7 +46,6 @@ func (t *egressTransport) RoundTrip(request *http.Request) (*http.Response, erro
 			return nil, err
 		}
 		if !configured {
-			idleRequest := t.withStreamIdleContext(request)
 			response, requestErr := t.fallback.RoundTrip(idleRequest)
 			infraegress.RecordDirectPhysicalCall(request.Context(), response, requestErr)
 			if requestErr != nil || response == nil || response.Body == nil {
@@ -47,18 +56,17 @@ func (t *egressTransport) RoundTrip(request *http.Request) (*http.Response, erro
 		}
 	}
 	if lease.UserAgent != "" {
-		request.Header.Set("User-Agent", lease.UserAgent)
+		idleRequest.Header.Set("User-Agent", lease.UserAgent)
 	}
-	idleRequest := t.withStreamIdleContext(request)
-	response, err := lease.Do(idleRequest)
+	response, err = lease.Do(idleRequest)
 	if err != nil {
 		if shouldReportEgressFailure(request.Context(), err) {
-			t.manager.FeedbackForScope(context.WithoutCancel(request.Context()), domainegress.ScopeBuild, lease.NodeID, 0, err)
+			t.manager.FeedbackForScope(request.Context(), domainegress.ScopeBuild, lease.NodeID, 0, err)
 		}
 		lease.Release()
 		return nil, err
 	}
-	t.manager.FeedbackForScope(context.WithoutCancel(request.Context()), domainegress.ScopeBuild, lease.NodeID, response.StatusCode, nil)
+	t.manager.FeedbackForScope(request.Context(), domainegress.ScopeBuild, lease.NodeID, response.StatusCode, nil)
 	if response.Body == nil {
 		lease.Release()
 		return response, nil

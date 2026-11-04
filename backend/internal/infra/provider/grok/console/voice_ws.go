@@ -117,11 +117,11 @@ func (a *Adapter) DialVoiceWebSocket(ctx context.Context, request provider.Voice
 				cleanup()
 				return nil, nil, errors.New("Console voice websocket 连接为空")
 			}
-			a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, http.StatusSwitchingProtocols, nil)
+			a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, http.StatusSwitchingProtocols, nil)
 			return connection, cleanup, nil
 		}
 		if response == nil {
-			a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, 0, dialErr)
+			a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, 0, dialErr)
 			cleanup()
 			return nil, nil, fmt.Errorf("拨号 Console voice websocket 失败: %w", dialErr)
 		}

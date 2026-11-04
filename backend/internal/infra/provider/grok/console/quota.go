@@ -83,12 +83,12 @@ func (a *Adapter) syncConsoleQuotas(ctx context.Context, credential account.Cred
 			return nil, time.Time{}, &egressBlockedError{retryAfter: delay}
 		}
 		if !errors.Is(err, provider.ErrUnauthorized) {
-			a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, 0, err)
+			a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, 0, err)
 		}
 		return nil, time.Time{}, err
 	}
 	a.breaker.reset(lease.NodeID)
-	a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, http.StatusOK, nil)
+	a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, http.StatusOK, nil)
 	now := time.Now().UTC()
 	return consoleQuotaWindows(credential.ID, usage, now), now, nil
 }

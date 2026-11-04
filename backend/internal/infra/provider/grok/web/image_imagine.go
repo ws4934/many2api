@@ -313,11 +313,11 @@ func (a *Adapter) generateWSImageAttempt(ctx context.Context, request provider.I
 				Header:     http.Header(response.Header).Clone(),
 			}, upstreamErr)
 			if response.StatusCode != http.StatusForbidden {
-				a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, err)
+				a.egress.Feedback(ctx, lease.NodeID, response.StatusCode, err)
 			}
 			return nil, upstreamErr
 		}
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
+		a.egress.Feedback(ctx, lease.NodeID, 0, err)
 		return nil, fmt.Errorf("连接 Imagine WebSocket: %w", err)
 	}
 	connectionOwned := true
@@ -331,14 +331,14 @@ func (a *Adapter) generateWSImageAttempt(ctx context.Context, request provider.I
 	_ = connection.SetReadDeadline(deadline)
 	_ = connection.SetWriteDeadline(deadline)
 	if err := connection.WriteJSON(imagineResetMessage()); err != nil {
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
+		a.egress.Feedback(ctx, lease.NodeID, 0, err)
 		return nil, err
 	}
 	reqID := newWebID("img")
 	message := imagineRequestMessage(reqID, request.Prompt, ratio, cfg.AllowNSFW, modelConfig.Pro, modelConfig.ExpectedCount)
 	requestparams.RecordUpstream(ctx, message)
 	if err := connection.WriteJSON(message); err != nil {
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
+		a.egress.Feedback(ctx, lease.NodeID, 0, err)
 		return nil, err
 	}
 	if request.Streaming {
@@ -359,7 +359,7 @@ func (a *Adapter) generateWSImageAttempt(ctx context.Context, request provider.I
 			if ctx.Err() == nil && collector.UsableCount() > 0 {
 				break // Keep final, unmoderated results; never replay the missing slots.
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, readErr)
+			a.egress.Feedback(ctx, lease.NodeID, 0, readErr)
 			return nil, fmt.Errorf("读取 Imagine WebSocket: %w", readErr)
 		}
 		if messageType != websocket.TextMessage {
@@ -373,15 +373,15 @@ func (a *Adapter) generateWSImageAttempt(ctx context.Context, request provider.I
 			if collector.UsableCount() > 0 {
 				break
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+			a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 			return nil, fmt.Errorf("Imagine WebSocket 返回错误")
 		}
 		collector.Accept(message)
 	}
 	if transportErr != nil {
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, transportErr)
+		a.egress.Feedback(ctx, lease.NodeID, 0, transportErr)
 	} else {
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+		a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 	}
 	images := collector.Images()
 	if len(images) == 0 {
@@ -425,7 +425,7 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 				_ = writer.CloseWithError(ctx.Err())
 				return
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, readErr)
+			a.egress.Feedback(ctx, lease.NodeID, 0, readErr)
 			_ = writer.CloseWithError(readErr)
 			return
 		}
@@ -437,7 +437,7 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 			continue
 		}
 		if message["type"] == "error" {
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+			a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 			_ = writer.CloseWithError(fmt.Errorf("Imagine WebSocket 返回错误"))
 			return
 		}
@@ -492,7 +492,7 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 					_ = writer.CloseWithError(err)
 					return
 				}
-				a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+				a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 				_ = writer.Close()
 				return
 			}
@@ -501,7 +501,7 @@ func (a *Adapter) streamImagineImages(ctx context.Context, writer *io.PipeWriter
 			return
 		}
 	}
-	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+	a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 	_ = writer.Close()
 }
 

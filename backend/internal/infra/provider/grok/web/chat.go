@@ -280,7 +280,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 				StatusCode: upstream.StatusCode, Status: upstream.Status, Header: http.Header(upstream.Header),
 				UpstreamURL: responseUpstreamURL(upstream),
 				Body: &releaseBody{ReadCloser: io.NopCloser(bytes.NewReader(body)), release: func() {
-					a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, upstream.StatusCode, nil)
+					a.egress.Feedback(ctx, lease.NodeID, upstream.StatusCode, nil)
 					lease.Release()
 				}},
 			}, nil
@@ -289,7 +289,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 			StatusCode: upstream.StatusCode, Status: upstream.Status, Header: http.Header(upstream.Header),
 			UpstreamURL: responseUpstreamURL(upstream),
 			Body: &releaseBody{ReadCloser: upstream.Body, release: func() {
-				a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, upstream.StatusCode, nil)
+				a.egress.Feedback(ctx, lease.NodeID, upstream.StatusCode, nil)
 				lease.Release()
 			}},
 		}, nil
@@ -320,7 +320,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		}
 		return nil, consumeErr
 	}
-	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+	a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 	parsed.InputTokens = estimateTokens(normalized.Prompt)
 	parsed.Tools = tools.ResponseTools
 	parsed.ToolChoice = tools.ResponseChoice
@@ -341,7 +341,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 }
 
 func (a *Adapter) feedbackAntiBot(ctx context.Context, lease *infraegress.Lease) {
-	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusForbidden, nil)
+	a.egress.Feedback(ctx, lease.NodeID, http.StatusForbidden, nil)
 }
 
 // feedbackStreamError reports a stream that failed after the upstream accepted
@@ -351,11 +351,11 @@ func (a *Adapter) feedbackStreamError(ctx context.Context, lease *infraegress.Le
 	var readErr webStreamReadError
 	switch {
 	case errors.As(err, &readErr):
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, err)
+		a.egress.Feedback(ctx, lease.NodeID, 0, err)
 	case errors.Is(err, errWebAntiBot):
 		a.feedbackAntiBot(ctx, lease)
 	default:
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+		a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 	}
 }
 

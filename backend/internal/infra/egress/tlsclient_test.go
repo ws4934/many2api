@@ -24,7 +24,7 @@ func TestToFHTTPRequestPreservesRequestFraming(t *testing.T) {
 	request.Host = "grok.com"
 	request.Header.Set("Content-Type", "application/json")
 
-	converted, err := toFHTTPRequest(request)
+	converted, err := ToFHTTPRequest(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestToFHTTPRequestPreservesRequestFraming(t *testing.T) {
 }
 
 func TestFromFHTTPResponseNormalizesAutoDecompressedHeaders(t *testing.T) {
-	response := fromFHTTPResponse(&fhttp.Response{
+	response := FromFHTTPResponse(&fhttp.Response{
 		Status: "200 OK", StatusCode: http.StatusOK, Proto: "HTTP/2.0", ProtoMajor: 2,
 		Header: fhttp.Header{
 			"Content-Encoding": []string{"gzip"},
@@ -71,7 +71,7 @@ func TestFromFHTTPResponseNormalizesAutoDecompressedHeaders(t *testing.T) {
 }
 
 func TestFromFHTTPResponsePreservesCompressedHeaders(t *testing.T) {
-	response := fromFHTTPResponse(&fhttp.Response{
+	response := FromFHTTPResponse(&fhttp.Response{
 		Status: "200 OK", StatusCode: http.StatusOK,
 		Header: fhttp.Header{"Content-Encoding": []string{"gzip"}, "Content-Length": []string{"128"}},
 		Body:   io.NopCloser(bytes.NewReader(nil)), ContentLength: 128,
@@ -89,7 +89,7 @@ func TestFromFHTTPResponseOwnsHeadersAndPreservesDeferredTrailers(t *testing.T) 
 		TransferEncoding: []string{"chunked"},
 		Body:             io.NopCloser(bytes.NewReader(nil)),
 	}
-	response := fromFHTTPResponse(source)
+	response := FromFHTTPResponse(source)
 
 	source.Header.Set("X-Upstream", "mutated")
 	source.TransferEncoding[0] = "identity"

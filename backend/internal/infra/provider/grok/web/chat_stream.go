@@ -202,7 +202,7 @@ func (a *Adapter) streamOpenAIResponse(ctx context.Context, source io.ReadCloser
 				return
 			}
 		}
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+		a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 		payload := buildOpenAIResult(operation, responseID, model, *parsed, false, options)
 		data, _ := json.Marshal(payload)
 		if operation == conversation.OperationResponses {

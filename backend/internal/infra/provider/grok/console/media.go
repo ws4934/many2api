@@ -162,7 +162,7 @@ func (a *Adapter) forwardConsoleMedia(ctx context.Context, credential account.Cr
 	}
 	response, err := a.doDPoPRequest(requestCtx, credential, token, lease, http.MethodPost, consoleV1Endpoint(cfg.BaseURL, path), body, "application/json")
 	if err != nil {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, 0, err)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, 0, err)
 		lease.Release()
 		cancel()
 		return nil, err
@@ -199,7 +199,7 @@ func (a *Adapter) forwardConsoleMedia(ctx context.Context, credential account.Cr
 	if format == "url" {
 		data, readErr := io.ReadAll(io.LimitReader(response.Body, consoleMediaBodyLimit+1))
 		_ = response.Body.Close()
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, readErr)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, readErr)
 		lease.Release()
 		cancel()
 		if readErr == nil && len(data) > consoleMediaBodyLimit {
@@ -226,7 +226,7 @@ func (a *Adapter) forwardConsoleMedia(ctx context.Context, credential account.Cr
 		return result, nil
 	}
 	release := func() {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
 		lease.Release()
 		cancel()
 	}
@@ -646,7 +646,7 @@ func (a *Adapter) doConsoleVideoJSON(ctx context.Context, credential account.Cre
 	defer cancel()
 	response, err := a.doDPoPRequest(requestCtx, credential, token, lease, method, endpoint, body, "application/json")
 	if err != nil {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, 0, err)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, 0, err)
 		return nil, err
 	}
 	defer response.Body.Close()
@@ -664,7 +664,7 @@ func (a *Adapter) doConsoleVideoJSON(ctx context.Context, credential account.Cre
 		a.reportConsoleResponse(ctx, lease, response.StatusCode, data)
 		return nil, newConsoleMediaUpstreamError(response.StatusCode, data, provider.ParseRetryAfterHeader(response.Header.Get("Retry-After"), time.Now().UTC()))
 	}
-	a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
+	a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
 	return data, nil
 }
 
@@ -760,7 +760,7 @@ func (a *Adapter) openConsoleAsset(ctx context.Context, credential account.Crede
 
 func (a *Adapter) feedbackConsoleAsset(ctx context.Context, lease *infraegress.Lease, status int, err error) {
 	if lease != nil {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsoleAsset, lease.NodeID, status, err)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsoleAsset, lease.NodeID, status, err)
 	}
 }
 

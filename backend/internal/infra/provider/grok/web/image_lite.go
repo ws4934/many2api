@@ -88,7 +88,7 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 				lease.Release()
 				return "", upstreamErr
 			}
-			a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, upstream.StatusCode, nil)
+			a.egress.Feedback(ctx, lease.NodeID, upstream.StatusCode, nil)
 			lease.Release()
 			return "", &liteUpstreamError{StatusCode: upstream.StatusCode, Status: upstream.Status, Body: body}
 		}
@@ -135,7 +135,7 @@ func (a *Adapter) generateLiteImageURL(ctx context.Context, credential account.C
 			}
 			return "", consumeErr
 		}
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+		a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 		lease.Release()
 		if firstImage != "" {
 			return firstImage, nil

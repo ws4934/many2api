@@ -279,7 +279,7 @@ func (a *Adapter) streamImageEdit(
 	}
 	urls := imageEditResultURLs(&parsed, capture.Bytes())
 	if len(urls) == 0 {
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+		a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 		_ = writer.CloseWithError(fmt.Errorf("上游未返回可用的编辑图片"))
 		return
 	}
@@ -298,7 +298,7 @@ func (a *Adapter) streamImageEdit(
 		_ = writer.CloseWithError(err)
 		return
 	}
-	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, http.StatusOK, nil)
+	a.egress.Feedback(ctx, lease.NodeID, http.StatusOK, nil)
 	_ = writer.Close()
 }
 

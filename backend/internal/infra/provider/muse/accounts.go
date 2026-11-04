@@ -380,11 +380,11 @@ func (a *Adapter) renewSession(ctx context.Context, credential account.Credentia
 	}
 	response, err := lease.Do(request)
 	if err != nil {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), scope, lease.NodeID, 0, err)
+		a.egress.FeedbackForScope(ctx, scope, lease.NodeID, 0, err)
 		return sessionInfo{}, nil, time.Time{}, &transportError{err: err}
 	}
 	defer response.Body.Close()
-	a.egress.FeedbackForScope(context.WithoutCancel(ctx), scope, lease.NodeID, response.StatusCode, nil)
+	a.egress.FeedbackForScope(ctx, scope, lease.NodeID, response.StatusCode, nil)
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
 		return sessionInfo{}, nil, time.Time{}, &transportError{err: err}

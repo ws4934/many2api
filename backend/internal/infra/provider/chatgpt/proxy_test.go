@@ -207,3 +207,12 @@ func TestUpstreamErrorTextCarriesEndpointAndBody(t *testing.T) {
 		t.Fatalf("error = %q", got)
 	}
 }
+
+func TestExpiredCallerIsNotAnEgressFailure(t *testing.T) {
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	adapter := &Adapter{}
+	if adapter.report(ctx, &infraegress.Lease{NodeID: 9}, &transportError{cause: ctx.Err()}) {
+		t.Fatal("caller timeout classified as proxy failure")
+	}
+}

@@ -295,7 +295,7 @@ func (a *Adapter) forwardConsoleVoiceBytes(ctx context.Context, credential accou
 	}
 	response, err := a.doDPoPRequestWithContentType(requestCtx, credential, token, lease, method, consoleV1Endpoint(cfg.BaseURL, pathValue), body, contentType, accept)
 	if err != nil {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, 0, err)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, 0, err)
 		lease.Release()
 		cancel()
 		return nil, err
@@ -313,7 +313,7 @@ func (a *Adapter) forwardConsoleVoiceBytes(ctx context.Context, credential accou
 		return response, nil
 	}
 	response.Body = &releaseBody{ReadCloser: response.Body, release: func() {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
 		lease.Release()
 		cancel()
 	}}

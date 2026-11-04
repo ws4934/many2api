@@ -166,6 +166,11 @@ func (m *Manager) Feedback(ctx context.Context, nodeID uint64, status int, trans
 }
 
 func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, nodeID uint64, status int, transportErr error) {
+	// Caller deadlines/cancellation do not describe the proxy's health. Keep
+	// that information until classification, then detach only the state write.
+	if ctx.Err() != nil {
+		return
+	}
 	// io.ErrClosedPipe means our side closed the stream (client gone or the
 	// gateway discarded the answer), not that the proxy failed.
 	if status == clientClosedRequestStatus || errors.Is(transportErr, context.Canceled) || errors.Is(transportErr, io.ErrClosedPipe) {
@@ -205,8 +210,8 @@ func (m *Manager) FeedbackForScope(ctx context.Context, scope domain.Scope, node
 	if succeeded && m.cachedNodeIsHealthy(nodeID) {
 		return
 	}
-	// Callers pass a detached context; bound the read and update.
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// Persist a classified outcome even if the caller leaves during the update.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	value, err := m.repository.GetEgressNode(ctx, nodeID)
 	if err != nil {

@@ -118,8 +118,8 @@ func parseUpstreamFrame(data []byte, parsed *parsedChat) (string, string, error)
 
 func parseUpstreamObject(data []byte, parsed *parsedChat) (string, string, error) {
 	var root map[string]any
-	if json.Unmarshal(data, &root) != nil {
-		return "", "", nil
+	if err := json.Unmarshal(data, &root); err != nil {
+		return "", "", fmt.Errorf("Grok Web 响应帧 JSON 无效: %w", err)
 	}
 	if event, ok := root["event"].(map[string]any); ok {
 		return parseGatewayEvent(event, parsed)

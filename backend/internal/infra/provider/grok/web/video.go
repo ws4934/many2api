@@ -364,13 +364,13 @@ func (a *Adapter) DownloadVideo(ctx context.Context, credential account.Credenti
 	request.Header.Del("Content-Type")
 	response, err := lease.Do(request)
 	if err != nil {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), domainegress.ScopeWebAsset, lease.NodeID, 0, err)
+		a.egress.FeedbackForScope(ctx, domainegress.ScopeWebAsset, lease.NodeID, 0, err)
 		lease.Release()
 		return nil, "", 0, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_ = response.Body.Close()
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), domainegress.ScopeWebAsset, lease.NodeID, response.StatusCode, nil)
+		a.egress.FeedbackForScope(ctx, domainegress.ScopeWebAsset, lease.NodeID, response.StatusCode, nil)
 		lease.Release()
 		return nil, "", 0, fmt.Errorf("下载视频返回 %d", response.StatusCode)
 	}
@@ -385,9 +385,9 @@ func (a *Adapter) DownloadVideo(ctx context.Context, credential account.Credenti
 	}
 	onFinished := func(readErr error, complete bool) {
 		if readErr != nil {
-			a.egress.FeedbackForScope(context.WithoutCancel(ctx), domainegress.ScopeWebAsset, lease.NodeID, 0, readErr)
+			a.egress.FeedbackForScope(ctx, domainegress.ScopeWebAsset, lease.NodeID, 0, readErr)
 		} else if complete {
-			a.egress.FeedbackForScope(context.WithoutCancel(ctx), domainegress.ScopeWebAsset, lease.NodeID, response.StatusCode, nil)
+			a.egress.FeedbackForScope(ctx, domainegress.ScopeWebAsset, lease.NodeID, response.StatusCode, nil)
 		}
 		lease.Release()
 	}

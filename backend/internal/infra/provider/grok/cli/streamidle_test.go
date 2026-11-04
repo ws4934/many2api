@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -291,3 +292,29 @@ func (r *feedReader) Read(p []byte) (int, error) {
 }
 
 func (r *feedReader) Close() error { return nil }
+
+func TestEgressTransportReleasesIdleContextWithoutBody(t *testing.T) {
+	for _, failed := range []bool{true, false} {
+		t.Run(fmt.Sprint(failed), func(t *testing.T) {
+			manager := infraegress.NewManager(emptyEgressRepository{}, nil)
+			manager.UpdateBuildStreamIdleTimeout(time.Minute)
+			var captured context.Context
+			transport := &egressTransport{manager: manager, fallback: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				captured = req.Context()
+				if failed {
+					return nil, errors.New("dial failed")
+				}
+				return &http.Response{StatusCode: 204}, nil
+			})}
+			request, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://fixture.invalid", nil)
+			request.Header.Set("Accept", "text/event-stream")
+			_, _ = transport.RoundTrip(request)
+			if captured == nil || captured.Err() == nil {
+				t.Fatal("request context retained after failure/no body")
+			}
+			if request.Context().Err() != nil {
+				t.Fatal("canceled the caller context")
+			}
+		})
+	}
+}

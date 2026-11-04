@@ -2,13 +2,11 @@
 package chatgpt
 
 import (
-	"io"
 	"net"
 	stdhttp "net/http"
 	"sync"
 	"time"
 
-	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/chatgpt/browserprofile"
@@ -82,20 +80,17 @@ func newBrowserHTTP(origin, proxyURL string, timeout time.Duration, profile brow
 }
 
 func (c *browserHTTP) Do(req *stdhttp.Request) (*stdhttp.Response, error) {
-	converted, err := fhttp.NewRequestWithContext(req.Context(), req.Method, req.URL.String(), req.Body)
+	converted, err := infraegress.ToFHTTPRequest(req)
 	if err != nil {
 		return nil, err
 	}
-	converted.Header = cloneFHTTPHeader(req.Header)
-	converted.ContentLength = req.ContentLength
-	converted.Close = req.Close
-	converted.Host = req.Host
+	browserprofile.SetHeaderOrder(converted.Header)
 
 	response, err := c.client.Do(converted)
 	if err != nil {
 		return nil, err
 	}
-	return cloneStdHTTPResponse(response), nil
+	return infraegress.FromFHTTPResponse(response), nil
 }
 
 func (c *browserHTTP) CloseIdleConnections() {
@@ -103,48 +98,3 @@ func (c *browserHTTP) CloseIdleConnections() {
 		c.client.CloseIdleConnections()
 	}
 }
-
-func cloneFHTTPHeader(source stdhttp.Header) fhttp.Header {
-	target := make(fhttp.Header, len(source)+1)
-	for key, values := range source {
-		target[key] = append([]string(nil), values...)
-	}
-	browserprofile.SetHeaderOrder(target)
-	return target
-}
-
-func cloneStdHTTPResponse(source *fhttp.Response) *stdhttp.Response {
-	target := &stdhttp.Response{
-		Status:           source.Status,
-		StatusCode:       source.StatusCode,
-		Proto:            source.Proto,
-		ProtoMajor:       source.ProtoMajor,
-		ProtoMinor:       source.ProtoMinor,
-		Header:           cloneStdHeader(source.Header),
-		Body:             source.Body,
-		ContentLength:    source.ContentLength,
-		TransferEncoding: append([]string(nil), source.TransferEncoding...),
-		Close:            source.Close,
-		Uncompressed:     source.Uncompressed,
-		Trailer:          cloneStdHeader(source.Trailer),
-	}
-	if target.Body == nil {
-		target.Body = io.NopCloser(nilReader{})
-	}
-	return target
-}
-
-func cloneStdHeader(source fhttp.Header) stdhttp.Header {
-	target := make(stdhttp.Header, len(source))
-	for key, values := range source {
-		if key == fhttp.HeaderOrderKey || key == fhttp.PHeaderOrderKey {
-			continue
-		}
-		target[key] = append([]string(nil), values...)
-	}
-	return target
-}
-
-type nilReader struct{}
-
-func (nilReader) Read([]byte) (int, error) { return 0, io.EOF }

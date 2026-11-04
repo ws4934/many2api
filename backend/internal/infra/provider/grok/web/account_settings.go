@@ -178,7 +178,7 @@ func (a *Adapter) executeWebAccountSetting(ctx context.Context, token string, le
 	response, requestErr := lease.Do(request)
 	if requestErr != nil {
 		cancel()
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, requestErr)
+		a.egress.Feedback(ctx, lease.NodeID, 0, requestErr)
 		return requestErr
 	}
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, webAccountSettingBodyLimit+1))
@@ -190,7 +190,7 @@ func (a *Adapter) executeWebAccountSetting(ctx context.Context, token string, le
 	if len(body) > webAccountSettingBodyLimit {
 		return fmt.Errorf("Grok Web 账号设置响应超过安全上限")
 	}
-	a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, response.StatusCode, nil)
+	a.egress.Feedback(ctx, lease.NodeID, response.StatusCode, nil)
 	if response.StatusCode == http.StatusUnauthorized {
 		return provider.ErrUnauthorized
 	}

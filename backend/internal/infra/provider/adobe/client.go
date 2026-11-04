@@ -218,9 +218,9 @@ func (c *client) poll(ctx context.Context, pollURL, kind string) (pollResult, er
 	if status < 200 || status >= 300 {
 		return pollResult{}, classifyUpstream("poll", status, bodyText(data))
 	}
-	taskStatus := strings.ToUpper(strings.TrimSpace(stringField(data, "status")))
+	taskStatus := strings.ToUpper(strings.TrimSpace(hdr.Get("x-task-status")))
 	if taskStatus == "" {
-		taskStatus = strings.ToUpper(hdr.Get("x-task-status"))
+		taskStatus = strings.ToUpper(strings.TrimSpace(stringField(data, "status")))
 	}
 	progress := progressValue(data["progress"])
 	var urls []string
@@ -240,10 +240,8 @@ func (c *client) poll(ctx context.Context, pollURL, kind string) (pollResult, er
 			}
 		}
 	}
-	// 官网只在 x-task-status 为 COMPLETED 时收尾：进行中的响应可能已带回部分输出。
-	if len(urls) > 0 && !strings.EqualFold(hdr.Get("x-task-status"), "IN_PROGRESS") {
-		return pollResult{status: "SUCCEEDED", progress: 100, outputURLs: urls}, nil
-	}
+	// Explicit task state wins over partial outputs; use JSON status when
+	// the endpoint does not send x-task-status.
 	switch taskStatus {
 	case "FAILED", "CANCELLED", "ERROR":
 		failure := upstreamReason(bodyText(data))
@@ -251,9 +249,13 @@ func (c *client) poll(ctx context.Context, pollURL, kind string) (pollResult, er
 			failure = truncate(bodyText(data), 300)
 		}
 		return pollResult{status: "FAILED", progress: progress, failure: failure}, nil
-	default:
+	case "IN_PROGRESS":
 		return pollResult{status: "IN_PROGRESS", progress: progress}, nil
 	}
+	if len(urls) > 0 {
+		return pollResult{status: "SUCCEEDED", progress: 100, outputURLs: urls}, nil
+	}
+	return pollResult{status: "IN_PROGRESS", progress: progress}, nil
 }
 
 // pollUntilDone 阻塞轮询直到任务成功（返回全部输出 URL）、失败或上下文结束。

@@ -126,7 +126,7 @@ func (a *Adapter) openGatewayChat(ctx context.Context, credential account.Creden
 		if handshake != nil {
 			return gatewayHandshakeResponse(handshake, endpoint), lease, previous, nil
 		}
-		a.egress.Feedback(context.WithoutCancel(ctx), lease.NodeID, 0, dialErr)
+		a.egress.Feedback(ctx, lease.NodeID, 0, dialErr)
 		lease.Release()
 		return nil, nil, nil, dialErr
 	}

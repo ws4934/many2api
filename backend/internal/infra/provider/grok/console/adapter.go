@@ -200,7 +200,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	}
 	response, err := a.doDPoPRequest(requestCtx, request.Credential, token, lease, http.MethodPost, consoleEndpoint(cfg.BaseURL), body, "*/*")
 	if err != nil {
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, 0, err)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, 0, err)
 		lease.Release()
 		cancel()
 		return nil, err
@@ -243,7 +243,7 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 		if responseReleased {
 			return
 		}
-		a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
+		a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, response.StatusCode, nil)
 		lease.Release()
 		cancel()
 	}
@@ -318,7 +318,7 @@ func (a *Adapter) reportConsoleResponse(ctx context.Context, lease *infraegress.
 		}
 		lease.InvalidateClearance()
 	}
-	a.egress.FeedbackForScope(context.WithoutCancel(ctx), egressdomain.ScopeConsole, lease.NodeID, status, nil)
+	a.egress.FeedbackForScope(ctx, egressdomain.ScopeConsole, lease.NodeID, status, nil)
 }
 
 func normalizeConversationError(data []byte, operation string, status int) []byte {
