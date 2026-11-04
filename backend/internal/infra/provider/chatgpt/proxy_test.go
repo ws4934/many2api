@@ -94,7 +94,7 @@ func TestBrowserHTTPProxyHandshakeEndsWithRequest(t *testing.T) {
 			mu.Unlock()
 		}
 	}()
-	for _, scheme := range []string{"socks5", "http"} {
+	for _, scheme := range []string{"socks5", "http", "https"} {
 		t.Run(scheme, func(t *testing.T) {
 			client, err := newBrowserHTTP("https://chatgpt.com", scheme+"://"+listener.Addr().String(), time.Minute, browserprofile.Default(), nil)
 			if err != nil {

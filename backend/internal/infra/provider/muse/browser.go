@@ -128,10 +128,19 @@ func (e *browserEngine) withPage(parent context.Context, timeout time.Duration, 
 	defer e.release()
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	return timedOut(parent, e.openAndRun(ctx, s, path, work))
+	proxyServer := ""
+	if s.OpenProxy != nil {
+		server, release, err := s.OpenProxy(ctx)
+		if err != nil {
+			return timedOut(parent, err)
+		}
+		defer release()
+		proxyServer = server
+	}
+	return timedOut(parent, e.openAndRun(ctx, s, path, proxyServer, work))
 }
 
-func (e *browserEngine) openAndRun(ctx context.Context, s session, path string, work func(context.Context, *page) error) error {
+func (e *browserEngine) openAndRun(ctx context.Context, s session, path, proxyServer string, work func(context.Context, *page) error) error {
 	conn, err := e.connect(ctx)
 	if err != nil {
 		return err
@@ -143,8 +152,8 @@ func (e *browserEngine) openAndRun(ctx context.Context, s session, path string, 
 		BrowserContextID string `json:"browserContextId"`
 	}
 	params := map[string]any{"disposeOnDetach": true}
-	if s.ProxyServer != "" {
-		params["proxyServer"] = s.ProxyServer
+	if proxyServer != "" {
+		params["proxyServer"] = proxyServer
 		params["proxyBypassList"] = "<-loopback>"
 	}
 	err = conn.call(setup, "", "Target.createBrowserContext", params, &bc)

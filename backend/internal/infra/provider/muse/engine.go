@@ -22,8 +22,9 @@ type engine interface {
 // session is the account a browser context logs in as.
 type session struct {
 	Cookies []cookie
-	// ProxyServer is scheme://host:port without credentials; empty is direct.
-	ProxyServer string
+	// OpenProxy is called after obtaining a page slot. The returned release
+	// closes the session's relay when that page finishes.
+	OpenProxy func(context.Context) (server string, release func(), err error)
 	// Identity is the desktop browser the account presents; zero keeps the
 	// browser's own.
 	Identity browserIdentity

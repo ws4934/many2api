@@ -15,7 +15,6 @@ import (
 // egressProxy is how a request reaches chatgpt.com through the selected egress.
 // HTTP(S) proxies use CONNECT; SOCKS and tunnel protocols replace the dialer.
 type egressProxy struct {
-	raw  string
 	url  *url.URL
 	dial func(context.Context, string, string) (net.Conn, error)
 }
@@ -26,7 +25,7 @@ func parseEgressProxy(raw string) (egressProxy, error) {
 	if err != nil {
 		return egressProxy{}, fmt.Errorf("invalid egress proxy: %w", err)
 	}
-	return egressProxy{raw: raw, url: connect, dial: dial}, nil
+	return egressProxy{url: connect, dial: dial}, nil
 }
 
 // apply routes an http.Transport through the proxy. Without a proxy the

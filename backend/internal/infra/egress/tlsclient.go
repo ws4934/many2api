@@ -21,6 +21,7 @@ import (
 	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/bogdanfinn/websocket"
 	"github.com/chenyme/grok2api/backend/internal/pkg/tunnelproxy"
+	"golang.org/x/net/http2"
 )
 
 type browserClient struct{ inner tlsclient.HttpClient }
@@ -80,7 +81,7 @@ func newBrowserClient(proxyURL, userAgent string) (*browserClient, error) {
 	// tls-client's own SOCKS and HTTP proxy dialers ignore the request context
 	// and dial under a client-wide lock, so one silent proxy would stall every
 	// request on the client. These dialers end with the request and bound the
-	// proxy handshake; HTTPS proxies keep tls-client's dialer.
+	// proxy handshake for HTTP and HTTPS proxies alike.
 	direct := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	connect, dial, err := tunnelproxy.Route(proxyURL, direct)
 	switch {
@@ -88,10 +89,8 @@ func newBrowserClient(proxyURL, userAgent string) (*browserClient, error) {
 		return nil, fmt.Errorf("浏览器出口代理: %w", err)
 	case dial != nil:
 		options = append(options, tlsclient.WithDialContext(dial))
-	case connect != nil && connect.Scheme == "http":
-		options = append(options, tlsclient.WithDialContext(ConnectDialContext(connect, direct)))
 	case connect != nil:
-		options = append(options, tlsclient.WithProxyUrl(proxyURL))
+		options = append(options, tlsclient.WithDialContext(ConnectDialContext(connect, direct)))
 	}
 	client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger(), options...)
 	if err != nil {
@@ -126,7 +125,7 @@ func ConnectDialContext(proxy *url.URL, direct *net.Dialer) func(context.Context
 		raw := conn
 		stop := context.AfterFunc(ctx, func() { _ = raw.Close() })
 		if err = conn.SetDeadline(time.Now().Add(direct.Timeout)); err == nil && proxy.Scheme == "https" {
-			secure := tls.Client(conn, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: proxy.Hostname(), NextProtos: []string{"http/1.1"}})
+			secure := tls.Client(conn, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: proxy.Hostname(), NextProtos: []string{"h2", "http/1.1"}})
 			err = secure.HandshakeContext(ctx)
 			conn = secure
 		}
@@ -134,18 +133,20 @@ func ConnectDialContext(proxy *url.URL, direct *net.Dialer) func(context.Context
 		if authorization != "" {
 			request.Header.Set("Proxy-Authorization", authorization)
 		}
-		if err == nil {
+		if secure, ok := conn.(*tls.Conn); err == nil && ok && secure.ConnectionState().NegotiatedProtocol == "h2" {
+			conn, err = connectHTTP2(conn, request)
+		} else if err == nil {
 			err = request.Write(conn)
-		}
-		if err == nil {
-			// Bound proxy response headers and preserve any coalesced target bytes.
-			reader := bufio.NewReader(io.LimitReader(conn, 64<<10))
-			var response *http.Response
-			if response, err = http.ReadResponse(reader, request); err == nil && response.StatusCode != http.StatusOK {
-				err = fmt.Errorf("代理 CONNECT 返回 %s", response.Status)
-			}
 			if err == nil {
-				conn = &bufferedProxyConn{Conn: conn, reader: io.MultiReader(reader, conn)}
+				// Bound proxy response headers and preserve any coalesced target bytes.
+				reader := bufio.NewReader(io.LimitReader(conn, 64<<10))
+				var response *http.Response
+				if response, err = http.ReadResponse(reader, request); err == nil && response.StatusCode != http.StatusOK {
+					err = fmt.Errorf("代理 CONNECT 返回 %s", response.Status)
+				}
+				if err == nil {
+					conn = &bufferedProxyConn{Conn: conn, reader: io.MultiReader(reader, conn)}
+				}
 			}
 		}
 		if !stop() {
@@ -155,7 +156,11 @@ func ConnectDialContext(proxy *url.URL, direct *net.Dialer) func(context.Context
 			err = conn.SetDeadline(time.Time{})
 		}
 		if err != nil {
-			_ = conn.Close()
+			if conn != nil {
+				_ = conn.Close()
+			} else {
+				_ = raw.Close()
+			}
 			return nil, err
 		}
 		return conn, nil
@@ -168,6 +173,48 @@ type bufferedProxyConn struct {
 }
 
 func (c *bufferedProxyConn) Read(b []byte) (int, error) { return c.reader.Read(b) }
+func (c *bufferedProxyConn) CloseWrite() error          { return closeWrite(c.Conn) }
+
+// One HTTP/2 stream owns this proxy connection, so socket deadlines and closure
+// apply to the whole tunnel just as they do for HTTP/1.1 CONNECT.
+func connectHTTP2(conn net.Conn, request *http.Request) (net.Conn, error) {
+	client, err := (&http2.Transport{}).NewClientConn(conn)
+	if err != nil {
+		return nil, err
+	}
+	reader, writer := io.Pipe()
+	request = request.Clone(context.Background())
+	request.URL = &url.URL{Host: request.Host}
+	request.Body = reader
+	response, err := client.RoundTrip(request)
+	if err != nil {
+		_ = reader.Close()
+		_ = writer.Close()
+		_ = client.Close()
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		_ = response.Body.Close()
+		_ = reader.Close()
+		_ = writer.Close()
+		_ = client.Close()
+		return nil, fmt.Errorf("代理 CONNECT 返回 %s", response.Status)
+	}
+	return &http2ProxyConn{Conn: conn, writer: writer, reader: response.Body}, nil
+}
+
+type http2ProxyConn struct {
+	net.Conn
+	writer *io.PipeWriter
+	reader io.ReadCloser
+}
+
+func (c *http2ProxyConn) Read(b []byte) (int, error)  { return c.reader.Read(b) }
+func (c *http2ProxyConn) Write(b []byte) (int, error) { return c.writer.Write(b) }
+func (c *http2ProxyConn) CloseWrite() error           { return c.writer.Close() }
+func (c *http2ProxyConn) Close() error {
+	return errors.Join(c.writer.Close(), c.reader.Close(), c.Conn.Close())
+}
 
 func browserProfile(userAgent string) profiles.ClientProfile {
 	match := chromeMajorPattern.FindStringSubmatch(strings.TrimSpace(userAgent))

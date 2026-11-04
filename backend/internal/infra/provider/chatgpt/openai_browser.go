@@ -68,13 +68,11 @@ func newBrowserHTTP(origin, proxyURL string, timeout time.Duration, profile brow
 	switch {
 	case egress.dial != nil:
 		options = append(options, tlsclient.WithDialContext(egress.dial))
-	case egress.url != nil && egress.url.Scheme == "http":
+	case egress.url != nil:
 		// tls-client's own CONNECT dialer ignores the request context and dials
 		// under a client-wide lock: one silent proxy would stall every request
-		// on this browser. HTTPS proxies keep tls-client's dialer.
+		// on this browser. Use the same bounded path for HTTP and HTTPS.
 		options = append(options, tlsclient.WithDialContext(infraegress.ConnectDialContext(egress.url, &net.Dialer{Timeout: 20 * time.Second})))
-	case egress.url != nil:
-		options = append(options, tlsclient.WithProxyUrl(egress.raw))
 	}
 	client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger(), options...)
 	if err != nil {

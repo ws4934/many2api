@@ -389,7 +389,7 @@ Muse 浏览器 → grok2api-browser-relay:会话临时端口 → 账号出口代
 
 Compose 已将后端和 `muse-browser` 加入专用的 `muse` 网络，服务名可直接解析，不需要宿主机端口映射。后端用 `grok2api-browser-relay` 别名绑定这张网卡；浏览器仅加入这张网，CDP 也不暴露给默认网络上的其他 sidecar。网络保留出网能力，直连账号仍可使用。
 
-- **账号隔离**：每次浏览器操作独占中转端口、上游路由和连接池。浏览器上下文结束或请求取消时，关闭监听、HTTP 连接和 WebSocket/CONNECT 隧道。Cookie 仍由独立的浏览器上下文隔离。
+- **账号隔离**：取得并发页面名额后才创建独占的中转端口和连接池，排队请求不占用中转监听端口；上游路由沿用账号出口。浏览器上下文结束或请求取消时，关闭监听、HTTP 连接和 WebSocket/CONNECT 隧道。Cookie 仍由独立的浏览器上下文隔离。
 - **HTTPS/WSS**：只转发 CONNECT 字节流，目标站 TLS 仍由 Chrome 建立，不解密网页流量。HTTPS 上游代理的证书正常校验。
 - **非 Compose 部署**：`browserProxy.listenHost` 是后端监听的本机 IP/主机名；`advertiseHost` 是浏览器能访问到的同一后端主机名/IP，均不含协议和端口。留空时，需中转的代理默认监听 `127.0.0.1`，适用于浏览器与后端同机。显式设置任一字段后，所有代理都走后端中转；未配置出口的账号仍直连。端口由系统按会话分配，无需手填。
 - **环境变量**：`GROK2API_BROWSER_PROXY_LISTEN_HOST` / `GROK2API_BROWSER_PROXY_ADVERTISE_HOST` 覆盖这两个字段，修改后重启后端。多实例时，公布地址必须唯一指向当前后端实例，不能使用轮询负载均衡别名。

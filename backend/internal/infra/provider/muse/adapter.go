@@ -92,15 +92,17 @@ func (a *Adapter) withSession(ctx context.Context, credential account.Credential
 		return err
 	}
 	defer lease.Release()
-	proxy, err := a.egress.AcquireBrowserProxy(ctx, lease)
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	openProxy := func(ctx context.Context) (string, func(), error) {
+		proxy, err := a.egress.AcquireBrowserProxy(ctx, lease)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", nil, ctx.Err()
+			}
+			return "", nil, &museError{status: http.StatusServiceUnavailable, code: "browser_proxy_unavailable", message: err.Error(), requestScoped: true}
 		}
-		return &museError{status: http.StatusServiceUnavailable, code: "browser_proxy_unavailable", message: err.Error(), requestScoped: true}
+		return proxy.ProxyServer, proxy.Release, nil
 	}
-	defer proxy.Release()
-	return fn(ctx, session{Cookies: jar, ProxyServer: proxy.ProxyServer, Identity: a.identityOf(credential), Timezone: usTimezones[credential.ID%uint64(len(usTimezones))]})
+	return fn(ctx, session{Cookies: jar, OpenProxy: openProxy, Identity: a.identityOf(credential), Timezone: usTimezones[credential.ID%uint64(len(usTimezones))]})
 }
 
 // identityOf is the browser identity stored with the account. An account

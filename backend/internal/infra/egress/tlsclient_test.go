@@ -135,7 +135,7 @@ func TestBrowserClientProxyHandshakeEndsWithRequest(t *testing.T) {
 			mu.Unlock()
 		}
 	}()
-	for _, scheme := range []string{"socks5", "socks4", "http"} {
+	for _, scheme := range []string{"socks5", "socks4", "http", "https"} {
 		t.Run(scheme, func(t *testing.T) {
 			client, err := newBrowserClient(scheme+"://"+listener.Addr().String(), DefaultUserAgent)
 			if err != nil {

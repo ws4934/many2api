@@ -80,9 +80,6 @@ func (m *Manager) AcquireBrowserProxy(ctx context.Context, lease *Lease) (*Brows
 	if err != nil {
 		return nil, errors.New("浏览器出口代理配置无效或协议不支持")
 	}
-	if connect == nil && dial == nil {
-		return nil, errors.New("浏览器出口代理未配置")
-	}
 	transport := &http.Transport{
 		DialContext: direct.DialContext, MaxIdleConns: 64, MaxIdleConnsPerHost: 16,
 		IdleConnTimeout: 60 * time.Second, TLSHandshakeTimeout: 15 * time.Second,
@@ -118,7 +115,6 @@ func startBrowserRelay(parent context.Context, cfg BrowserProxyConfig, transport
 	var lc net.ListenConfig
 	listener, err := lc.Listen(parent, "tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
-		transport.CloseIdleConnections()
 		return nil, errors.New("浏览器代理中转监听失败，请检查 browserProxy.listenHost")
 	}
 	if addr, ok := listener.Addr().(*net.TCPAddr); !ok || addr.IP.IsUnspecified() {
@@ -193,7 +189,8 @@ type relayConn struct {
 	owner *browserRelay
 }
 
-func (c *relayConn) Close() error { c.owner.untrack(c); return c.Conn.Close() }
+func (c *relayConn) Close() error      { c.owner.untrack(c); return c.Conn.Close() }
+func (c *relayConn) CloseWrite() error { return closeWrite(c.Conn) }
 
 func (p *browserRelay) track(c net.Conn) {
 	p.mu.Lock()
@@ -242,8 +239,6 @@ func (p *browserRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		defer downstream.Close()
 		defer p.untrack(downstream)
-		stop := context.AfterFunc(p.ctx, func() { _ = upstream.Close() })
-		defer stop()
 		// Write only the upgrade headers; Response.Write would consume the tunnel.
 		response.Body = nil
 		response.Header.Del("Proxy-Authenticate")
@@ -263,7 +258,11 @@ func (p *browserRelay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(response.StatusCode)
 	// Flush each copy chunk: event streams must not wait for a 4 KiB buffer.
-	_, _ = io.Copy(flushingWriter{w}, response.Body)
+	if _, err := io.Copy(flushingWriter{w}, response.Body); err != nil {
+		// Headers have already been sent. Abort rather than turn a truncated
+		// upstream body into a successfully terminated chunked response.
+		panic(http.ErrAbortHandler)
+	}
 }
 
 func (p *browserRelay) connect(w http.ResponseWriter, r *http.Request) {
@@ -277,8 +276,6 @@ func (p *browserRelay) connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer upstream.Close()
-	stop := context.AfterFunc(p.ctx, func() { _ = upstream.Close() })
-	defer stop()
 	downstream, buffered, err := w.(http.Hijacker).Hijack()
 	if err != nil {
 		return
@@ -294,14 +291,30 @@ func (p *browserRelay) connect(w http.ResponseWriter, r *http.Request) {
 	relayStreams(downstream, buffered, upstream)
 }
 
-// Closing either side terminates both copies, including browser WebSockets.
+// EOF closes only that direction, allowing the peer to finish its response.
+// Errors and lease cancellation still close both connections.
 func relayStreams(downstream net.Conn, reader io.Reader, upstream io.ReadWriteCloser) {
+	copyDirection := func(dst io.WriteCloser, src io.Reader) {
+		_, err := io.Copy(dst, src)
+		if err == nil {
+			err = closeWrite(dst)
+		}
+		if err != nil {
+			_ = upstream.Close()
+			_ = downstream.Close()
+		}
+	}
 	done := make(chan struct{})
-	go func() { _, _ = io.Copy(upstream, reader); _ = upstream.Close(); _ = downstream.Close(); close(done) }()
-	_, _ = io.Copy(downstream, upstream)
-	_ = upstream.Close()
-	_ = downstream.Close()
+	go func() { copyDirection(upstream, reader); close(done) }()
+	copyDirection(downstream, upstream)
 	<-done
+}
+
+func closeWrite(conn io.Closer) error {
+	if half, ok := conn.(interface{ CloseWrite() error }); ok {
+		return half.CloseWrite()
+	}
+	return conn.Close()
 }
 
 type flushingWriter struct{ http.ResponseWriter }

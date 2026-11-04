@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
@@ -29,14 +30,35 @@ func testAuthenticatedProxy(t *testing.T, username string) (*httptest.Server, *a
 	var calls atomic.Int32
 	transport := &http.Transport{}
 	t.Cleanup(transport.CloseIdleConnections)
-	forward := &browserRelay{ctx: t.Context(), transport: transport, dial: (&net.Dialer{Timeout: time.Second}).DialContext, conns: make(map[net.Conn]struct{})}
+	forward := &httputil.ReverseProxy{Director: func(*http.Request) {}, Transport: transport}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Proxy-Authorization") != "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":secret")) {
 			w.WriteHeader(http.StatusProxyAuthRequired)
 			return
 		}
 		calls.Add(1)
-		forward.ServeHTTP(w, r)
+		if r.Method != http.MethodConnect {
+			forward.ServeHTTP(w, r)
+			return
+		}
+		// Independent upstream fixture: do not run the relay under test twice.
+		upstream, err := net.DialTimeout("tcp", r.Host, time.Second)
+		if err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		defer upstream.Close()
+		conn, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
+		done := make(chan struct{})
+		go func() { _, _ = io.Copy(upstream, buffered); _ = upstream.(*net.TCPConn).CloseWrite(); close(done) }()
+		_, _ = io.Copy(conn, upstream)
+		_ = conn.Close()
+		<-done
 	}))
 	t.Cleanup(server.Close)
 	return server, &calls
@@ -490,6 +512,19 @@ func TestBrowserProxyTrustedHTTPS(t *testing.T) {
 		// Isolated subprocess: no global trust changes leak to other tests.
 		t.Setenv("GODEBUG", "x509usefallbackroots=1")
 		x509.SetFallbackRoots(roots)
+		upstreamURL, _ := url.Parse(upstream)
+		dial := ConnectDialContext(upstreamURL, &net.Dialer{Timeout: time.Second})
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		if conn, err := dial(ctx, "tcp", "stall.invalid:443"); err == nil {
+			conn.Close()
+			t.Fatal("stalled CONNECT succeeded")
+		}
+		if conn, err := dial(t.Context(), "tcp", "denied.invalid:443"); err == nil {
+			conn.Close()
+			t.Fatal("rejected CONNECT succeeded")
+		}
+
 		relay := testBrowserProxy(t, t.Context(), upstream)
 		proxy, _ := url.Parse(relay.ProxyServer)
 		conn, err := ConnectDialContext(proxy, &net.Dialer{Timeout: 3 * time.Second})(t.Context(), "tcp", "target.invalid:443")
@@ -497,31 +532,127 @@ func TestBrowserProxyTrustedHTTPS(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer conn.Close()
+		if _, err := io.WriteString(conn, "tunnel-request"); err != nil {
+			t.Fatal(err)
+		}
+		if err := closeWrite(conn); err != nil {
+			t.Fatal(err)
+		}
 		data, err := io.ReadAll(conn)
 		if err != nil || string(data) != "trusted-https" {
 			t.Fatalf("%q %v", data, err)
 		}
 		return
 	}
-	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "CONNECT" || r.Host != "target.invalid:443" || r.Header.Get("Proxy-Authorization") != "Basic dXNlcjpzZWNyZXQ=" {
-			w.WriteHeader(407)
-			return
-		}
+	for _, protocol := range []int{1, 2} {
+		t.Run(fmt.Sprintf("HTTP%d", protocol), func(t *testing.T) {
+			upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.ProtoMajor != protocol || r.Method != "CONNECT" || r.Header.Get("Proxy-Authorization") != "Basic dXNlcjpzZWNyZXQ=" {
+					w.WriteHeader(407)
+					return
+				}
+				switch r.Host {
+				case "stall.invalid:443":
+					<-r.Context().Done()
+					return
+				case "denied.invalid:443":
+					w.WriteHeader(407)
+					return
+				case "target.invalid:443":
+				default:
+					w.WriteHeader(502)
+					return
+				}
+				if protocol == 2 {
+					w.WriteHeader(200)
+					w.(http.Flusher).Flush()
+					data, err := io.ReadAll(r.Body)
+					if err != nil || string(data) != "tunnel-request" {
+						t.Errorf("h2 tunnel request: %q %v", data, err)
+						return
+					}
+					_, _ = io.WriteString(w, "trusted-https")
+					return
+				}
+				conn, reader, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\n\r\n")
+				data, err := io.ReadAll(reader)
+				if err != nil || string(data) != "tunnel-request" {
+					t.Errorf("h1 tunnel request: %q %v", data, err)
+					return
+				}
+				_, _ = io.WriteString(conn, "trusted-https")
+			}))
+			upstream.EnableHTTP2 = protocol == 2
+			upstream.StartTLS()
+			defer upstream.Close()
+			cert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: upstream.Certificate().Raw})
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestBrowserProxyTrustedHTTPS$", "-test.timeout=10s")
+			command.Env = append(os.Environ(), "BROWSER_PROXY_TEST_HTTPS_URL="+strings.Replace(upstream.URL, "://", "://user:secret@", 1), "BROWSER_PROXY_TEST_CA="+string(cert))
+			if out, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("HTTPS relay: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
+func TestBrowserProxyDoesNotMaskTruncatedResponse(t *testing.T) {
+	// Write malformed chunked framing independently of the relay implementation.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			return
 		}
 		defer conn.Close()
-		io.WriteString(conn, "HTTP/1.1 200 OK\r\n\r\ntrusted-https")
+		_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n")
 	}))
 	defer upstream.Close()
-	cert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: upstream.Certificate().Raw})
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestBrowserProxyTrustedHTTPS$", "-test.timeout=10s")
-	command.Env = append(os.Environ(), "BROWSER_PROXY_TEST_HTTPS_URL="+strings.Replace(upstream.URL, "://", "://user:secret@", 1), "BROWSER_PROXY_TEST_CA="+string(cert))
-	if out, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("HTTPS relay: %v\n%s", err, out)
+	relay := testBrowserProxy(t, t.Context(), strings.Replace(upstream.URL, "://", "://user:secret@", 1))
+	response, err := testProxyClient(t, relay).Get("http://target.invalid/file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if string(body) != "hello" || err == nil {
+		t.Fatalf("truncation was masked: body=%q err=%v", body, err)
+	}
+}
+
+func TestBrowserProxyPreservesTCPHalfClose(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, reader, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\n\r\n")
+		body, _ := io.ReadAll(reader)
+		if string(body) == "request" {
+			_, _ = io.WriteString(conn, "reply")
+		}
+	}))
+	defer upstream.Close()
+	relay := testBrowserProxy(t, t.Context(), strings.Replace(upstream.URL, "://", "://user:secret@", 1))
+	proxy, _ := url.Parse(relay.ProxyServer)
+	conn, err := ConnectDialContext(proxy, &net.Dialer{Timeout: time.Second})(t.Context(), "tcp", "target.invalid:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(time.Second))
+	_, _ = io.WriteString(conn, "request")
+	if err := closeWrite(conn); err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(conn)
+	if string(body) != "reply" || err != nil {
+		t.Fatalf("reply lost after half-close: %q %v", body, err)
 	}
 }

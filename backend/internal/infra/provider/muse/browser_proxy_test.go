@@ -111,9 +111,16 @@ func TestLiveAuthenticatedBrowserProxy(t *testing.T) {
 	for i, credential := range credentials {
 		go func() {
 			done <- adapter.withSession(ctx, credential, func(ctx context.Context, s session) error {
-				addresses <- s.ProxyServer
-				if strings.Contains(s.ProxyServer, "secret") || strings.Contains(s.ProxyServer, "@") {
-					return fmt.Errorf("credential in browser URL")
+				open := s.OpenProxy
+				s.OpenProxy = func(ctx context.Context) (string, func(), error) {
+					server, release, err := open(ctx)
+					if err == nil {
+						addresses <- server
+						if strings.Contains(server, "secret") || strings.Contains(server, "@") {
+							t.Error("credential in browser URL")
+						}
+					}
+					return server, release, err
 				}
 				return engine.withPage(ctx, 20*time.Second, s, "/thread/new", func(ctx context.Context, p *page) error {
 					var result struct {
@@ -156,7 +163,7 @@ func TestLiveAuthenticatedBrowserProxy(t *testing.T) {
 	t.Log("two Chrome contexts reached their own authenticated upstreams through private relay DNS; cookies isolated; listeners released")
 }
 
-func TestSessionReleasesBrowserProxyOnCallbackFailure(t *testing.T) {
+func TestBrowserProxyAllocatedOnlyAfterPageSlot(t *testing.T) {
 	adapter, credential, _ := newTestAdapter(t, &fakeEngine{})
 	encrypted, err := adapter.cipher.Encrypt("http://user:secret@127.0.0.1:9")
 	if err != nil {
@@ -165,27 +172,70 @@ func TestSessionReleasesBrowserProxyOnCallbackFailure(t *testing.T) {
 	credential.EgressNodeID = 1
 	manager := infraegress.NewManager(proxyAccountRepository{nodes: map[uint64]egressdomain.Node{1: {ID: 1, Scope: scope, Enabled: true, Health: 1, EncryptedProxyURL: encrypted}}}, adapter.cipher)
 	adapter.egress = manager
-	var endpoint string
-	failure := fmt.Errorf("fixture page failure")
-	err = adapter.withSession(t.Context(), credential, func(_ context.Context, s session) error {
-		endpoint = s.ProxyServer
-		return failure
+	chrome := newFakeChrome(t) // connects but rejects context creation
+	engine := newBrowserEngine(func() Config { return Config{BrowserURL: chrome.URL, MaxPages: 1} }, adapter.log)
+	t.Cleanup(func() {
+		if engine.conn != nil {
+			engine.conn.close()
+		}
 	})
-	if err != failure {
+	var opened, released atomic.Int32
+	var endpoint string
+	run := func(ctx context.Context) error {
+		return adapter.withSession(ctx, credential, func(ctx context.Context, s session) error {
+			open := s.OpenProxy
+			s.OpenProxy = func(ctx context.Context) (string, func(), error) {
+				opened.Add(1)
+				server, release, err := open(ctx)
+				if err != nil {
+					return "", nil, err
+				}
+				endpoint = server
+				return server, func() { release(); released.Add(1) }, nil
+			}
+			return engine.withPage(ctx, time.Second, s, "/thread/new", func(context.Context, *page) error { t.Error("unexpected page"); return nil })
+		})
+	}
+	// Saturated page capacity must not open any relays for queued requests.
+	if err := engine.acquire(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Host == "" {
-		t.Fatalf("no relay: %s %v", endpoint, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 64)
+	for range 64 {
+		go func() { done <- run(ctx) }()
 	}
+	for range 64 {
+		if err := <-done; err == nil {
+			t.Fatal("queued request unexpectedly ran")
+		}
+	}
+	if opened.Load() != 0 {
+		t.Fatalf("queued requests opened %d relays", opened.Load())
+	}
+	engine.release()
+
+	// A free slot opens a relay; a CDP failure still releases it and the slot.
+	if err := run(t.Context()); err == nil {
+		t.Fatal("expected CDP failure")
+	}
+	if opened.Load() != 1 || released.Load() != 1 || engine.active != 0 {
+		t.Fatalf("opened=%d released=%d active=%d", opened.Load(), released.Load(), engine.active)
+	}
+	parsed, _ := url.Parse(endpoint)
 	if conn, err := net.DialTimeout("tcp", parsed.Host, time.Second); err == nil {
 		conn.Close()
-		t.Fatal("failed session leaked relay")
+		t.Fatal("failed page leaked relay")
 	}
+
 	manager.SetBrowserProxyConfig(infraegress.BrowserProxyConfig{ListenHost: "0.0.0.0"})
-	err = adapter.withSession(t.Context(), credential, func(context.Context, session) error { t.Fatal("ran browser after listener failure"); return nil })
+	err = run(t.Context())
 	known, ok := err.(*museError)
 	if !ok || known.status != 503 || !known.requestScoped || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("bad deployment error: %v", err)
+	}
+	if engine.active != 0 {
+		t.Fatal("failed proxy setup leaked page slot")
 	}
 }
