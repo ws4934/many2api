@@ -573,6 +573,8 @@ make swagger
 
 ## 相关文档
 
+- [各渠道模型能力、参考图数量与视频时长](./MODEL_CAPABILITIES.md)
+
 - [English README](./README.md)
 - [后端说明](./backend/README.md)
 - [前端说明](./frontend/README.md)

@@ -638,6 +638,8 @@ make swagger
 
 ## Documentation
 
+- [Model capabilities and limits (中文)](./MODEL_CAPABILITIES.md)
+
 - [简体中文 README](./README.zh-CN.md)
 - [Backend guide](./backend/README.md)
 - [Frontend guide](./frontend/README.md)

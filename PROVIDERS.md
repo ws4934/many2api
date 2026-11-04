@@ -4,6 +4,8 @@
 
 > **状态**：ChatGPT 的协议代码只用模拟上游测过。OAuth、聊天、生图、蒙版、透明背景都要先用真实账号逐项验收，再对外开放。
 
+模型逐项能力、参考图数量、出图数、视频时长与组合限制见 [MODEL_CAPABILITIES.md](MODEL_CAPABILITIES.md)。
+
 ## 架构
 
 ```
