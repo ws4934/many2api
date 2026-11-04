@@ -15,7 +15,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/domain/clientkey"
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/web"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/web"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
 )
 

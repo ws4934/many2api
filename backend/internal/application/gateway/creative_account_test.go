@@ -15,7 +15,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/domain/clientkey"
 	"github.com/chenyme/grok2api/backend/internal/domain/media"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/console"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
 )
 
 func TestCreativeAccountBypassesQuotaAndCooldownButNotScopeOrCapacity(t *testing.T) {

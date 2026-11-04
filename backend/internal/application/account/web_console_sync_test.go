@@ -14,7 +14,7 @@ import (
 	accountdomain "github.com/chenyme/grok2api/backend/internal/domain/account"
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
-	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/console"
+	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 	"github.com/chenyme/grok2api/backend/internal/repository"

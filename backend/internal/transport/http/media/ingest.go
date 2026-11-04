@@ -412,3 +412,9 @@ func (h *Handler) releaseIngest() { <-h.ingestSlots }
 func FetchRemoteMedia(ctx context.Context, rawURL string) ([]byte, error) {
 	return fetchRemote(ctx, rawURL, "image/*, video/*")
 }
+
+// FetchRemoteAttachment keeps the same size and DNS-pinned SSRF checks for
+// providers that accept documents/audio. The provider validates file types.
+func FetchRemoteAttachment(ctx context.Context, rawURL string) ([]byte, error) {
+	return fetchRemote(ctx, rawURL, "*/*")
+}

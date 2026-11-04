@@ -30,7 +30,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/adobe"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/console"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
 	"github.com/chenyme/grok2api/backend/internal/repository"
 )

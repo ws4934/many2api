@@ -10,6 +10,16 @@ import (
 
 const mediaJobInputImageConstraint = "chk_media_jobs_input_image_count"
 
+func currentMediaJobInputConstraint(definition string) bool {
+	// PostgreSQL inserts parentheses and ::text casts; SQLite retains BETWEEN.
+	normalized := strings.ToLower(strings.Join(strings.Fields(definition), ""))
+	normalized = strings.NewReplacer("(", "", ")", "", "::text", "").Replace(normalized)
+	video := strings.Contains(normalized, fmt.Sprintf("input_image_count<=%d", media.MaxVideoInputImages)) ||
+		strings.Contains(normalized, fmt.Sprintf("input_image_countbetween0and%d", media.MaxVideoInputImages))
+	image := strings.Contains(normalized, fmt.Sprintf("kind<>'image'orinput_image_count<=%d", media.MaxImageJobInputs))
+	return video && image
+}
+
 // updateMediaJobInputImageConstraint updates this one authorized image ceiling.
 // AutoMigrate creates missing named CHECKs but does not update their
 // expressions. Run inside initialization's PostgreSQL transaction / SQLite
@@ -24,7 +34,7 @@ func (d *Database) updateMediaJobInputImageConstraint(ctx context.Context) error
 			WHERE conrelid = to_regclass('media_jobs') AND conname = ?`, mediaJobInputImageConstraint).Scan(&definition).Error; err != nil {
 			return err
 		}
-		if strings.Contains(strings.Join(strings.Fields(definition), " "), fmt.Sprintf("input_image_count <= %d", media.MaxVideoInputImages)) {
+		if currentMediaJobInputConstraint(definition) {
 			return nil
 		}
 		if err := db.Migrator().DropConstraint(&mediaJobModel{}, mediaJobInputImageConstraint); err != nil {
@@ -35,7 +45,7 @@ func (d *Database) updateMediaJobInputImageConstraint(ctx context.Context) error
 		if err := db.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_jobs'").Scan(&ddl).Error; err != nil {
 			return err
 		}
-		if strings.Contains(strings.Join(strings.Fields(ddl), " "), fmt.Sprintf("input_image_count BETWEEN 0 AND %d", media.MaxVideoInputImages)) {
+		if currentMediaJobInputConstraint(ddl) {
 			return nil
 		}
 		// The SQLite migrator replaces an existing named CHECK in one table

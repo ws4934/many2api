@@ -44,10 +44,10 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/adobe"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/chatgpt"
-	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/cli"
-	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/console"
+	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/cli"
+	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
 	museprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/muse"
-	webprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/web"
+	webprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/web"
 	infraqualityguard "github.com/chenyme/grok2api/backend/internal/infra/qualityguard"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
 	redisruntime "github.com/chenyme/grok2api/backend/internal/infra/runtime/redis"
@@ -258,7 +258,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (_ *Applic
 	egressManager.SetExtensionClearance(egressdomain.Scope(account.ProviderChatGPT), chatgptClearanceTarget(cfg))
 	adobeAdapter := adobe.NewAdapter(adobeProviderConfig(cfg), egressManager, cipher, mediaService, mediatransport.FetchRemoteMedia)
 	adobeAdapter.SetLogger(logger)
-	museAdapter := museprovider.NewAdapter(museProviderConfig(cfg), egressManager, cipher, mediaService, mediatransport.FetchRemoteMedia)
+	museAdapter := museprovider.NewAdapter(museProviderConfig(cfg), egressManager, cipher, mediaService, mediatransport.FetchRemoteAttachment)
 	museAdapter.SetLogger(logger)
 	providers := provider.NewRegistry(cliAdapter, webAdapter, consoleAdapter, chatgptAdapter, adobeAdapter, museAdapter)
 	if err := providers.Validate(); err != nil {

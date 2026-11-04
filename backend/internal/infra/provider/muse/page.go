@@ -332,8 +332,9 @@ func (p *page) waitMedia(ctx context.Context, job mediaJob, baseline []string, s
 	}
 	resumed := sentAt.IsZero()
 	reported := resumed
-	var lastText, trace string
-	started, changed := time.Now(), time.Now()
+	var trace string
+	var textWait mediaTextWait
+	started := time.Now()
 	for {
 		var st mediaState
 		if err := p.js(ctx, "media", &st, string(job.Kind), baseline); err != nil {
@@ -362,10 +363,8 @@ func (p *page) waitMedia(ctx context.Context, job mediaJob, baseline []string, s
 			if !resumed && st.MD == "" && st.Stuck && time.Since(sentAt) > 30*time.Second {
 				return foundMedia{}, fmt.Errorf("%w: page still shows the message as sending", errNotDelivered)
 			}
-			if st.MD != lastText || st.Stop || st.Pending > 0 {
-				lastText, changed = st.MD, time.Now()
-			} else if lastText != "" && time.Since(changed) >= 15*time.Second {
-				return foundMedia{}, &textOnlyError{Text: truncateRunes(lastText, 300)}
+			if textWait.textOnly(st, time.Now()) {
+				return foundMedia{}, &textOnlyError{Text: truncateRunes(st.MD, 300)}
 			}
 		}
 		if err := sleep(ctx, 500*time.Millisecond); err != nil {

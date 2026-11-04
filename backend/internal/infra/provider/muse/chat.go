@@ -35,6 +35,14 @@ type contentPart struct {
 	Type     string          `json:"type"`
 	Text     string          `json:"text"`
 	ImageURL json.RawMessage `json:"image_url"`
+	FileURL  string          `json:"file_url"`
+	FileData string          `json:"file_data"`
+	FileID   string          `json:"file_id"`
+	Filename string          `json:"filename"`
+	Audio    *struct {
+		Data   string `json:"data"`
+		Format string `json:"format"`
+	} `json:"input_audio"`
 }
 
 // ForwardResponse serves Responses; Chat Completions and Messages are
@@ -52,7 +60,8 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	var options conversation.ResponseOptions
 	if request.NormalizeBody && (operation == conversation.OperationChat || operation == conversation.OperationMessages) {
 		var err error
-		if body, options, err = conversation.ConvertRequestWithOptions(body, request.Model, operation); err != nil {
+		body, options, err = conversation.ConvertRequestWithOptions(body, request.Model, operation, conversation.InputPolicy{Files: true, Audio: true})
+		if err != nil {
 			return errorResponse(operation, http.StatusBadRequest, "invalid_request", err.Error()), nil
 		}
 	}
@@ -61,18 +70,15 @@ func (a *Adapter) ForwardResponse(ctx context.Context, request provider.Response
 	if err := json.Unmarshal(body, &in); err != nil {
 		return errorResponse(operation, http.StatusBadRequest, "invalid_request", "请求 JSON 无效"), nil
 	}
-	prompt, imageRefs, err := buildChatPrompt(in)
+	prompt, refs, err := buildChatPrompt(in)
 	if err != nil {
 		return failureResponse(operation, err)
 	}
-	turn := chatTurn{Prompt: prompt}
-	for _, ref := range imageRefs {
-		input, err := a.readInput(ctx, ref)
-		if err != nil {
-			return failureResponse(operation, err)
-		}
-		turn.Images = append(turn.Images, input)
+	inputs, err := a.readReferences(ctx, refs)
+	if err != nil {
+		return failureResponse(operation, err)
 	}
+	turn := chatTurn{Prompt: prompt, Inputs: inputs}
 	reply := newReply(request.Model, prompt)
 	if !request.Streaming && !in.Stream {
 		var final string
@@ -165,16 +171,16 @@ func (b *streamBody) Close() error {
 }
 
 // buildChatPrompt flattens the Responses input into one message: each
-// request is a new side chat, so the history travels in the prompt. Images
-// of the last user message become attachments; earlier ones are noted.
-func buildChatPrompt(in responsesRequest) (string, []string, error) {
+// request is a new side chat, so the history travels in the prompt. Attachments
+// of the last user message are uploaded; earlier ones are only described.
+func buildChatPrompt(in responsesRequest) (string, []attachmentReference, error) {
 	var system []string
 	if text := strings.TrimSpace(in.Instructions); text != "" {
 		system = append(system, text)
 	}
 	type turn struct{ role, text string }
 	var turns []turn
-	var lastImages []string
+	var lastInputs []attachmentReference
 	var items []inputItem
 	var text string
 	if json.Unmarshal(in.Input, &text) == nil {
@@ -185,7 +191,7 @@ func buildChatPrompt(in responsesRequest) (string, []string, error) {
 	for _, item := range items {
 		switch item.Type {
 		case "", "message":
-			body, images, err := messageContent(item.Content)
+			body, inputs, err := messageContent(item.Content)
 			if err != nil {
 				return "", nil, err
 			}
@@ -195,9 +201,9 @@ func buildChatPrompt(in responsesRequest) (string, []string, error) {
 					system = append(system, body)
 				}
 			case "user":
-				lastImages = images
-				if len(images) > 0 && body == "" {
-					body = "[image]"
+				lastInputs = inputs
+				if len(inputs) > 0 && body == "" {
+					body = attachmentLabels(inputs)
 				}
 				if body != "" {
 					turns = append(turns, turn{"user", body})
@@ -218,9 +224,9 @@ func buildChatPrompt(in responsesRequest) (string, []string, error) {
 	if len(turns) == 0 || turns[len(turns)-1].role != "user" {
 		return "", nil, badRequest("最后一条消息必须来自用户")
 	}
-	// Earlier user images are only described; the last message's go along.
+	// Only the final user's attachments go into this new side chat.
 	if len(turns) == 1 && len(system) == 0 {
-		return turns[0].text, lastImages, nil
+		return turns[0].text, lastInputs, nil
 	}
 	var builder strings.Builder
 	if len(system) > 0 {
@@ -234,12 +240,11 @@ func buildChatPrompt(in responsesRequest) (string, []string, error) {
 		builder.WriteString(label + ":\n" + value.text + "\n\n")
 	}
 	builder.WriteString("Reply to the last User message.")
-	return builder.String(), lastImages, nil
+	return builder.String(), lastInputs, nil
 }
 
-// messageContent returns the text of a message and the image references of
-// its input_image parts.
-func messageContent(raw json.RawMessage) (string, []string, error) {
+// messageContent preserves attachment order across images, audio and files.
+func messageContent(raw json.RawMessage) (string, []attachmentReference, error) {
 	if len(raw) == 0 {
 		return "", nil, nil
 	}
@@ -251,7 +256,8 @@ func messageContent(raw json.RawMessage) (string, []string, error) {
 	if err := json.Unmarshal(raw, &parts); err != nil {
 		return "", nil, badRequest("消息 content 格式无效")
 	}
-	var texts, images []string
+	var texts []string
+	var inputs []attachmentReference
 	for _, part := range parts {
 		switch part.Type {
 		case "input_text", "output_text", "text":
@@ -268,11 +274,36 @@ func messageContent(raw json.RawMessage) (string, []string, error) {
 				ref = object.URL
 			}
 			if ref = strings.TrimSpace(ref); ref != "" {
-				images = append(images, ref)
+				inputs = append(inputs, attachmentReference{URL: ref, Kind: mediaImage})
 			}
+		case "input_file":
+			part.FileURL, part.FileData = strings.TrimSpace(part.FileURL), strings.TrimSpace(part.FileData)
+			if part.FileID != "" {
+				return "", nil, badRequest("Muse 对话不支持 file_id，请使用 file_url 或 file_data")
+			}
+			if (strings.TrimSpace(part.FileURL) == "") == (strings.TrimSpace(part.FileData) == "") {
+				return "", nil, badRequest("input_file 必须且只能提供 file_url 或 file_data")
+			}
+			ref := strings.TrimSpace(part.FileURL)
+			if part.FileData != "" {
+				ref = strings.TrimSpace(part.FileData)
+				if !strings.HasPrefix(ref, "data:") {
+					ref = "data:application/octet-stream;base64," + ref
+				}
+			}
+			inputs = append(inputs, attachmentReference{URL: ref, Name: part.Filename, Kind: mediaAny})
+		case "input_audio":
+			if part.Audio == nil || strings.TrimSpace(part.Audio.Data) == "" {
+				return "", nil, badRequest("input_audio 缺少 data")
+			}
+			mime := audioFormats[strings.ToLower(strings.TrimSpace(part.Audio.Format))]
+			if mime == "" {
+				return "", nil, badRequest("input_audio.format 只支持 mp3、wav、m4a、ogg、flac、aac 或 opus")
+			}
+			inputs = append(inputs, attachmentReference{URL: "data:" + mime + ";base64," + strings.TrimSpace(part.Audio.Data), Kind: mediaAudio})
 		}
 	}
-	return strings.Join(texts, "\n"), images, nil
+	return strings.Join(texts, "\n"), inputs, nil
 }
 
 func outputText(raw json.RawMessage) string {

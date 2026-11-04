@@ -1,4 +1,4 @@
-# Provider 架构与 ChatGPT 接入
+# Provider 架构与渠道接入
 
 网关里的每个上游（Grok Build、Grok Web、Grok Console、ChatGPT、Adobe、Muse）都是一个 Provider。它们共用同一套账号管理、客户端密钥、模型路由与价格、请求审计、媒体任务和图库。新增 Provider 时不需要另建一套。
 
@@ -9,7 +9,7 @@
 ```
 infra/provider.Registry
   ├─ Definition（能力、额度方式、凭据方式、展示名、出口作用域、默认并发、额度模式、是否走 xAI 官方价）
-  └─ 适配器：cli(grok_build) web(grok_web) console(grok_console) chatgpt adobe muse
+  └─ 适配器：grok/{cli,web,console}、chatgpt、adobe、muse
         │
         ├─ GET /api/admin/v1/providers ── 前端 Provider 目录（账号页、密钥、模型、审计、仪表盘、出口设置）
         ├─ 网关：选路由 → 密钥范围 → 选账号 → 预留费用 → 转发 → 分类 → 结算 → 审计
@@ -18,6 +18,15 @@ infra/provider.Registry
 ```
 
 Provider 的能力由 `Definition` 声明，再由可选接口实现：对话、模型目录、凭据导入、续期、交互式登录、身份、额度、图片、异步图片、视频、语音。注册表启动时会交叉校验声明和实现是否一致。
+
+### 渠道规则由接口实现，不写进公共入口
+
+- `ImageRequestNormalizer`、`VideoRequestNormalizer`：由各 Provider 决定有效参数、参考素材数量和输入组合。同步请求与异步任务都先归一化，再选账号、预留费用、上传或暂存输入；记录和计费使用实际保留的输入。
+- `VideoKeyframeValidator`：由支持关键帧的 Provider 校验时间规则。Console 的 1/3 秒时间槽规则放在自身目录，公共网关不替其他渠道套用。
+- 对话协议转换只负责字段映射；Provider 通过 `conversation.InputPolicy` 选择是否接收 Chat 的文件、音频内容，再由自身校验格式与上游能力。未开放的类型保持拒绝。
+- 公共层保留请求体、SSRF、任务存储和资源预算等统一安全边界。图片任务最多存储 20 个输入；这个上限不代表任何模型支持 20 张图。
+
+代码目录：`provider/` 放公共接口与注册表；`provider/grok/` 放 Grok 共用的视频策略、工具 schema 和 JSON 辅助逻辑，`grok/image/` 放图片公共处理；`grok/cli/`、`grok/web/`、`grok/console/` 各自持有鉴权、模型和请求策略。三个渠道的 ID 仍是 `grok_build`、`grok_web`、`grok_console`，配置、公开模型名和数据库标识不变。
 
 ### 新增一个 Provider
 
@@ -393,10 +402,44 @@ Muse 是 Meta 的 agent 应用（`https://muse.ai`）。它没有公开 API：�
 
 定价：Muse 没有官方价，未设价按 0 计费、模型页标"未定价"。
 
+### 使用参考视频
+
+向 `/v1/videos/generations` 传 `reference_videos`，可与 `reference_images` 和显式首帧 `image` 同用：
+
+```json
+{
+  "model": "muse-video",
+  "prompt": "参考[视频1]的动作，使用[图1]中的角色，生成一个新视频",
+  "reference_images": [{"url": "https://example.com/character.png"}],
+  "reference_videos": [{"url": "https://example.com/motion.mp4"}]
+}
+```
+
+视频引用也接受暂存文件的 `file_id`。图片先上传，视频随后上传；`[图N]`、`[视频N]` 分别按各自类型的顺序编号。只有显式传入的 `image` 被指定为首帧，参考图不会自动变成首帧。
+
+### 在对话中读取音频和文档
+
+向 `/v1/responses` 的 `muse-spark` 传 `input_file`，可使用公网 HTTPS 文件地址或 Base64 `file_data`：
+
+```json
+{
+  "model": "muse-spark",
+  "input": [{"role": "user", "content": [
+    {"type": "input_text", "text": "总结这份报告"},
+    {"type": "input_file", "filename": "report.pdf", "file_url": "https://example.com/report.pdf"}
+  ]}]
+}
+```
+
+`file_data` 接受 Base64 data URI 或裸 Base64，不与 `file_url` 同传；不支持对话 `file_id`。Chat Completions 使用 `{"type":"file","file":{...}}`，音频可用 `{"type":"input_audio","input_audio":{"data":"<Base64>","format":"wav"}}`。Messages 使用 `document` 内容块的 `url` 或 `base64` source。
+
+支持 PDF、DOC、DOCX 和 MP3、WAV、M4A、Ogg/Opus、FLAC、AAC；按实际内容识别，不仅看文件名。只上传最后一条用户消息的附件，按原顺序排列。音频、文档输入用于对话；图片、视频生成接口的参考类型保持前述范围，`reference_audios` 不改作音频文件地址。
+
 ### 限制
 
 - **出口**：使用作用域 `muse` 的出口节点，节点的代理设为该账号浏览器上下文的代理。Chrome 不支持带用户名密码的代理，也不支持 Trojan/VLESS/SS/VMess 隧道（与 FlareSolverr 相同），这类节点会被拒绝并提示原因；只能用无认证的 HTTP(S) / SOCKS 代理或直连。
-- **对话**：每个请求在网页里新开一个对话，历史消息由客户端每次带上；请求里的 `tools` 会被忽略（网页端的 agent 不会返回函数调用），历史里的工具调用和结果按文字转述。最后一条用户消息里的图片作为附件上传，更早的图片只标注为 `[image]`。
-- **图片**：每次只出一张图，`n` 大于 1 时网关把请求分摊到多个账号。编辑的输入图超过 4 张时保留前 4 张。不支持蒙版、流式出图；比例取自 `aspect_ratio` 或 `size`，和 `resolution` 一起写进提示词，`size` 不是 宽x高 时忽略。agent 只回文字（多为拒绝）时返回 422，不扣账号健康度。
-- **视频**：支持文生视频、首帧图片（`image`）和参考图（`reference_images`），两者合计最多 4 张，多出的保留前面的；参考音频忽略。比例取 16:9、9:16、1:1、4:3、3:4 中最近的，`duration` 对齐到 1–15 秒（默认 5），按 720p 计价。时长和比例写进提示词，最终由 agent 决定：实测要求 5 秒，得到 10 秒的 1280×720 H.264。
+- **对话**：每个请求在网页里新开一个对话，历史消息由客户端每次带上；请求里的 `tools` 会被忽略（网页端的 agent 不会返回函数调用），历史里的工具调用和结果按文字转述。最后一条用户消息的所有附件合计最多 10 个；更早的附件不重复上传。
+- **图片**：每次只出一张图，`n` 大于 1 时网关把请求分摊到多个账号。编辑的输入图超过 10 张时保留前 10 张。不支持蒙版、流式出图；比例取自 `aspect_ratio` 或 `size`，和 `resolution` 一起写进提示词，`size` 不是 宽x高 时忽略。agent 只回文字（多为拒绝）时返回 422，不扣账号健康度；“已生成、等待交付”等状态回复继续等待真实附件，直至任务超时。
+- **视频**：支持文生视频、首帧图片（`image`）、参考图（`reference_images`）和参考视频（`reference_videos`），附件合计最多 10 个。仅图片输入时多出的保留前面的；包含参考视频时，合计超过 10 个返回参数错误，不丢弃视频。参考音频仍忽略。比例取 16:9、9:16、1:1、4:3、3:4 中最近的，`duration` 对齐到 1–15 秒（默认 5），按 720p 计价。时长和比例写进提示词，最终由 agent 决定：实测要求 5 秒，得到 10 秒的 1280×720 H.264。
+- **参考素材**：图片支持 PNG、JPEG、WebP、GIF；参考视频支持 MP4、MOV、WebM，需可读取的有效时长，最多 120 秒。沿用网关单文件 20 MiB 上限，附件总大小最多 100 MiB；媒体任务的 data URI 和暂存输入仍受 32 MiB 编码预算约束。上传原件不会作为生成结果交付；新视频任务的原件识别信息随 checkpoint 保存，恢复时无需重新下载输入。
 - **视频无法在浏览器里播放**：headless-shell 不带 H.264 解码器，网关拿不到视频宽高，但下载不受影响。

@@ -440,14 +440,17 @@ func randomSeed() int64 {
 // keptImages keeps the first input images up to what the model takes, instead
 // of refusing the rest; a mask counts toward the model's total.
 func (v *modelVersion) keptImages(urls []string, mask bool) []string {
-	keep := len(urls)
+	return urls[:v.keptImageCount(len(urls), mask)]
+}
+
+func (v *modelVersion) keptImageCount(keep int, mask bool) int {
 	if _, limit := v.referenceUsage(); limit > 0 {
 		keep = min(keep, limit)
 	}
 	if limit := v.maxBlobs; limit > 0 {
 		keep = min(keep, max(limit-boolCount(mask), 1))
 	}
-	return urls[:keep]
+	return keep
 }
 
 func (v *modelVersion) imagePlan(prompt, size, aspect, resolution, quality, background string, count, inputs int, mask bool) (genInput, error) {

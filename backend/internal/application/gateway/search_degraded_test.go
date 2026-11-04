@@ -26,7 +26,7 @@ import (
 	infraegress "github.com/chenyme/grok2api/backend/internal/infra/egress"
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/web"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/web"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
 	"github.com/chenyme/grok2api/backend/internal/repository"
 )

@@ -54,7 +54,7 @@ type attachment struct {
 
 type chatTurn struct {
 	Prompt string
-	Images []attachment
+	Inputs []attachment
 }
 
 type mediaKind string
@@ -62,12 +62,17 @@ type mediaKind string
 const (
 	mediaImage mediaKind = "image"
 	mediaVideo mediaKind = "video"
+	// Input-only kinds; generated results remain image or video.
+	mediaAudio mediaKind = "audio"
+	mediaAny   mediaKind = "file"
 )
 
 type mediaJob struct {
 	Kind   mediaKind
 	Prompt string
 	Inputs []attachment
+	// InputDigests identify uploaded originals even after a video job resumes.
+	InputDigests []string
 	// Thread resumes a job whose prompt was already sent: the engine opens
 	// this thread path (/thread/<id>) and only waits for its result.
 	Thread string

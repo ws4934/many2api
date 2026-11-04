@@ -241,12 +241,12 @@ func imageReferences(raw json.RawMessage, nested bool) ([]string, error) {
 // turns bare base64 into a data URI; providers fetch and validate the content.
 func imageInputURL(value string) (string, error) {
 	value = strings.TrimSpace(value)
-	lower := strings.ToLower(value)
 	switch {
-	case strings.HasPrefix(lower, "https://"):
+	case len(value) >= 8 && strings.EqualFold(value[:8], "https://"):
 		return value, nil
-	case strings.HasPrefix(lower, "data:"):
-		header, _, ok := strings.Cut(lower, ",")
+	case len(value) >= 5 && strings.EqualFold(value[:5], "data:"):
+		header, _, ok := strings.Cut(value, ",")
+		header = strings.ToLower(header)
 		if !ok || !strings.HasPrefix(header, "data:image/") || !strings.HasSuffix(header, ";base64") {
 			return "", errImageReference
 		}
@@ -256,7 +256,17 @@ func imageInputURL(value string) (string, error) {
 	if err != nil {
 		return "", errImageReference
 	}
-	return imageDataURI(raw)
+	mimeType := http.DetectContentType(raw)
+	if !strings.HasPrefix(mimeType, "image/") {
+		return "", errImageReference
+	}
+	// Decode once to validate/sniff. Reuse the client's encoding instead of
+	// allocating another full binary-to-base64 conversion. DecodeString accepts
+	// CR/LF; strip only those to keep the former canonical output.
+	if strings.ContainsAny(value, "\r\n") {
+		value = strings.ReplaceAll(strings.ReplaceAll(value, "\r", ""), "\n", "")
+	}
+	return "data:" + mimeType + ";base64," + value, nil
 }
 
 func imageDataURI(raw []byte) (string, error) {

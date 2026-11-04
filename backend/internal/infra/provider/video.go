@@ -1,14 +1,12 @@
 package provider
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	"github.com/chenyme/grok2api/backend/internal/domain/media"
@@ -127,23 +125,14 @@ func WrapVideoStage(stage VideoStage, status int, err error) error {
 	return &VideoStageError{Stage: stage, Status: status, Err: err}
 }
 
-// VideoOperation selects the official xAI video endpoint family.
+// VideoOperation selects generation, editing or extension; each provider
+// declares and validates the operations its upstream supports.
 type VideoOperation = media.VideoOperation
 
 const (
 	VideoOperationGenerate = media.VideoOperationGenerate
 	VideoOperationEdit     = media.VideoOperationEdit
 	VideoOperationExtend   = media.VideoOperationExtend
-)
-
-// Console video reference limits follow the model-specific xAI contract.
-// They are shared by admission control and the Console adapter so invalid
-// asynchronous jobs are rejected before enqueueing without weakening the
-// adapter's final request-boundary validation.
-const (
-	ConsoleVideoMaxReferenceImages          = 7
-	ConsoleVideo15MaxReferenceImages        = 14
-	ConsoleVideoMaxReferenceDurationSeconds = 10
 )
 
 // VideoRequestOptions are the video parameters a route must accept before a job is queued.
@@ -170,6 +159,23 @@ type VideoRequestOptions struct {
 type VideoRequestValidator interface {
 	Adapter
 	ValidateVideoRequest(options VideoRequestOptions) error
+}
+
+// VideoKeyframeValidator owns the upstream's timestamp quantization rules.
+// A provider that declares VideoKeyframes must implement this interface.
+type VideoKeyframeValidator interface {
+	Adapter
+	ValidateVideoKeyframes(frames []media.VideoKeyframe, duration int) error
+}
+
+func (r *Registry) ValidateVideoKeyframes(value account.Provider, frames []media.VideoKeyframe, duration int) error {
+	if len(frames) == 0 {
+		return nil
+	}
+	if validator, ok := adapterAs[VideoKeyframeValidator](r, value); ok {
+		return validator.ValidateVideoKeyframes(frames, duration)
+	}
+	return fmt.Errorf("%w: 该模型不支持 keyframes", ErrVideoParameterInvalid)
 }
 
 // VideoRequestNormalizer picks the duration, aspect ratio and resolution a
@@ -325,49 +331,6 @@ func (r *Registry) NormalizeVideoRequest(value account.Provider, options VideoRe
 		}
 	}
 	return options, r.ValidateVideoRequest(value, options)
-}
-
-// grokVideoRatios are the aspect ratios the Grok video APIs take.
-var grokVideoRatios = []string{"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"}
-
-// NormalizeGrokVideoRequest fills the xAI defaults and maps other values onto
-// the xAI ranges instead of refusing them, since clients written for other
-// video APIs send theirs: generation defaults to 16:9, 720p and 8 s and takes
-// the closest ratio and resolution and a 1–15 s duration, where only
-// grok-imagine-video-1.5 without references renders 1080p; an edit takes no
-// duration, aspect ratio or resolution; an extension runs 2–10 s, 6 s by
-// default.
-func NormalizeGrokVideoRequest(options VideoRequestOptions) (VideoRequestOptions, error) {
-	switch options.Operation {
-	case VideoOperationGenerate:
-	case VideoOperationEdit:
-		options.AspectRatio, options.Resolution, options.Duration = "", "", 0
-		return options, nil
-	case VideoOperationExtend:
-		options.AspectRatio, options.Resolution = "", ""
-		options.Duration = min(max(cmp.Or(options.Duration, 6), 2), 10)
-		return options, nil
-	default:
-		return options, nil
-	}
-	options.AspectRatio = cmp.Or(ClosestImageRatio(options.AspectRatio, grokVideoRatios), "16:9")
-	options.Duration = min(max(cmp.Or(options.Duration, 8), 1), 15)
-	tiers := []string{"480p", "720p"}
-	if strings.TrimSpace(options.UpstreamModel) == "grok-imagine-video-1.5" && options.ReferenceImages == 0 && options.ReferenceAudios == 0 && !options.HasLastFrame && options.Keyframes == 0 {
-		tiers = append(tiers, "1080p")
-	}
-	options.Resolution = cmp.Or(ClosestImageTier(options.Resolution, tiers), "720p")
-	return options, nil
-}
-
-// FitGrokVideoInputs fits Build and classic Console's exclusive input modes:
-// the first frame wins over references, otherwise at most maxReferences remain.
-func FitGrokVideoInputs(options VideoRequestOptions, maxReferences int) VideoRequestOptions {
-	if options.HasImage {
-		options.ReferenceImages, options.ReferenceAudios = 0, 0
-	}
-	options.ReferenceImages = min(options.ReferenceImages, maxReferences)
-	return options
 }
 
 // VideoQuotaMode refines a video route's quota mode by resolution.

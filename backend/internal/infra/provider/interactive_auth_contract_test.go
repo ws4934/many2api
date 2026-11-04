@@ -7,7 +7,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
-	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/cli"
+	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/cli"
 )
 
 type interactiveContractAdapter struct{ credential provider.CredentialSurface }

@@ -40,6 +40,7 @@ func (a *Adapter) Definition() provider.Definition {
 		Media: provider.MediaSurface{
 			ImageGeneration: true, ImageEdit: true, VideoGeneration: true,
 			ImageGenerationModelPriced: true, SingleImagePerRequest: true,
+			VideoReferenceVideos: true,
 		},
 		Inference: provider.InferencePolicy{Usage: provider.UsageEstimated},
 	}

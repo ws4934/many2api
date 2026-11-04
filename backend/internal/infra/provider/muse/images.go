@@ -14,8 +14,10 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 )
 
-// maxInputImages bounds the attachments of one prompt.
-const maxInputImages = 4
+func (*Adapter) NormalizeImageRequest(options provider.ImageRequestOptions) (provider.ImageRequestOptions, error) {
+	options.InputImages = min(options.InputImages, maxInputAttachments)
+	return options, nil
+}
 
 func (a *Adapter) ValidateImageRequest(options provider.ImageRequestOptions) error {
 	switch {
@@ -37,15 +39,11 @@ func (a *Adapter) GenerateImage(ctx context.Context, request provider.ImageGener
 }
 
 func (a *Adapter) EditImage(ctx context.Context, request provider.ImageEditRequest) (*provider.Response, error) {
-	// Images beyond the four one prompt carries are dropped, the first ones kept.
-	refs := request.ImageURLs[:min(len(request.ImageURLs), maxInputImages)]
-	inputs := make([]attachment, 0, len(refs))
-	for _, ref := range refs {
-		input, err := a.readInput(ctx, ref)
-		if err != nil {
-			return failureResponse("", err)
-		}
-		inputs = append(inputs, input)
+	// Keep the first images when a caller sends more than the composer takes.
+	refs := request.ImageURLs[:min(len(request.ImageURLs), maxInputAttachments)]
+	inputs, err := a.readInputs(ctx, refs, nil)
+	if err != nil {
+		return failureResponse("", err)
 	}
 	prompt := "Edit the image attached to this message as described below. Use only the attached images, not earlier pictures. Reply with the edited image."
 	return a.drawImage(ctx, request.Credential, withShape(prompt, request.AspectRatio, request.Size, request.Resolution)+"\n\n"+request.Prompt, inputs, request.ResponseFormat)
@@ -132,42 +130,4 @@ func gcd(a, b int) int {
 		a, b = b, a%b
 	}
 	return a
-}
-
-// readInput loads an input image given as a staged job input, a data URI or
-// an https URL.
-func (a *Adapter) readInput(ctx context.Context, ref string) (attachment, error) {
-	ref = strings.TrimSpace(ref)
-	var data []byte
-	switch meta, payload, _ := strings.Cut(ref, ","); {
-	case provider.IsInputReference(ref):
-		raw, _, err := provider.ReadInput(ctx, ref)
-		if err != nil {
-			return attachment{}, err
-		}
-		data = raw
-	case strings.HasPrefix(meta, "data:") && strings.HasSuffix(meta, ";base64"):
-		raw, err := base64.StdEncoding.DecodeString(payload)
-		if err != nil {
-			return attachment{}, badRequest("输入图片的 data URI 不是有效的 Base64")
-		}
-		data = raw
-	case strings.HasPrefix(ref, "https://") && a.fetchRemote != nil:
-		raw, err := a.fetchRemote(ctx, ref)
-		if err != nil {
-			if ctx.Err() != nil {
-				return attachment{}, ctx.Err()
-			}
-			return attachment{}, badRequest("无法下载输入图片（需可公网访问的 https 地址）")
-		}
-		data = raw
-	default:
-		return attachment{}, badRequest("输入图片必须是 Base64 data URI 或 https URL")
-	}
-	mime := http.DetectContentType(data)
-	extension := map[string]string{"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}[mime]
-	if extension == "" {
-		return attachment{}, badRequest("输入图片只支持 PNG、JPEG、WebP 或 GIF")
-	}
-	return attachment{Name: "image." + extension, MIME: mime, Data: data}, nil
 }

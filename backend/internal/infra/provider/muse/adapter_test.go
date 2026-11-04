@@ -330,7 +330,7 @@ func TestBuildChatPrompt(t *testing.T) {
 			t.Fatalf("prompt %q lacks %q", prompt, want)
 		}
 	}
-	if len(images) != 1 || images[0] != "https://x.test/a.png" {
+	if len(images) != 1 || images[0].URL != "https://x.test/a.png" {
 		t.Fatalf("images = %v", images)
 	}
 	if _, _, err := buildChatPrompt(responsesRequest{Input: json.RawMessage(`[{"role":"assistant","content":"hi"}]`)}); err == nil {
@@ -569,15 +569,15 @@ func TestReadInputOpensStagedReference(t *testing.T) {
 func TestVideoReferenceImages(t *testing.T) {
 	adapter := &Adapter{}
 	base := provider.VideoRequestOptions{Operation: provider.VideoOperationGenerate, AspectRatio: "16:9", Duration: 5}
-	// Images beyond four keep the first ones; reference audios are dropped.
+	// Images beyond ten keep the first ones; reference audios are dropped.
 	for _, tc := range []struct {
 		edit       func(*provider.VideoRequestOptions)
 		references int
 	}{
-		{func(o *provider.VideoRequestOptions) { o.ReferenceImages = maxInputImages }, maxInputImages},
-		{func(o *provider.VideoRequestOptions) { o.ReferenceImages = maxInputImages + 1 }, maxInputImages},
-		{func(o *provider.VideoRequestOptions) { o.HasImage, o.ReferenceImages = true, maxInputImages-1 }, maxInputImages - 1},
-		{func(o *provider.VideoRequestOptions) { o.HasImage, o.ReferenceImages = true, maxInputImages }, maxInputImages - 1},
+		{func(o *provider.VideoRequestOptions) { o.ReferenceImages = maxInputAttachments }, maxInputAttachments},
+		{func(o *provider.VideoRequestOptions) { o.ReferenceImages = maxInputAttachments + 1 }, maxInputAttachments},
+		{func(o *provider.VideoRequestOptions) { o.HasImage, o.ReferenceImages = true, maxInputAttachments-1 }, maxInputAttachments - 1},
+		{func(o *provider.VideoRequestOptions) { o.HasImage, o.ReferenceImages = true, maxInputAttachments }, maxInputAttachments - 1},
 		{func(o *provider.VideoRequestOptions) { o.ReferenceAudios = 1 }, 0},
 	} {
 		options := base

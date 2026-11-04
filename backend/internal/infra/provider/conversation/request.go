@@ -21,27 +21,38 @@ func ConvertRequest(body []byte, model, operation string) ([]byte, error) {
 }
 
 // ConvertRequestWithOptions 同时返回下游协议特有的响应语义，供 JSON/SSE 转换阶段使用。
-func ConvertRequestWithOptions(body []byte, model, operation string) ([]byte, ResponseOptions, error) {
-	return convertRequestWithReasoningReplay(body, model, operation, nil, "")
+func ConvertRequestWithOptions(body []byte, model, operation string, policy ...InputPolicy) ([]byte, ResponseOptions, error) {
+	return convertRequestWithReasoningReplay(body, model, operation, nil, "", contentPolicy(policy))
 }
 
 // ConvertRequestWithReasoningReplay is used by providers that can establish a
 // trusted client-session scope. It keeps the public conversion path stateless
 // when no such scope is available.
-func ConvertRequestWithReasoningReplay(body []byte, model, operation string, cache *ReasoningCache, scope string) ([]byte, ResponseOptions, error) {
-	return convertRequestWithReasoningReplay(body, model, operation, cache, scope)
+func ConvertRequestWithReasoningReplay(body []byte, model, operation string, cache *ReasoningCache, scope string, policy ...InputPolicy) ([]byte, ResponseOptions, error) {
+	return convertRequestWithReasoningReplay(body, model, operation, cache, scope, contentPolicy(policy))
 }
 
-func convertRequestWithReasoningReplay(body []byte, model, operation string, cache *ReasoningCache, scope string) ([]byte, ResponseOptions, error) {
+func convertRequestWithReasoningReplay(body []byte, model, operation string, cache *ReasoningCache, scope string, policy InputPolicy) ([]byte, ResponseOptions, error) {
 	switch operation {
 	case OperationChat:
-		return convertChatRequestWithReasoningReplay(body, model, cache, scope)
+		return convertChatRequestWithReasoningReplay(body, model, cache, scope, policy)
 	case OperationMessages:
 		return convertMessagesRequestWithReasoningReplay(body, model, cache, scope)
 	default:
 		converted, err := replaceModel(body, model)
 		return converted, ResponseOptions{}, err
 	}
+}
+
+// InputPolicy is chosen by each provider, not inferred from a model name.
+// The zero value preserves the legacy text/image-only Chat conversion.
+type InputPolicy struct{ Files, Audio bool }
+
+func contentPolicy(values []InputPolicy) InputPolicy {
+	if len(values) > 0 {
+		return values[0]
+	}
+	return InputPolicy{}
 }
 
 func replaceModel(body []byte, model string) ([]byte, error) {

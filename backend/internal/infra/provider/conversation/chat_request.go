@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func convertChatRequestWithReasoningReplay(body []byte, model string, cache *ReasoningCache, scope string) ([]byte, ResponseOptions, error) {
+func convertChatRequestWithReasoningReplay(body []byte, model string, cache *ReasoningCache, scope string, policy InputPolicy) ([]byte, ResponseOptions, error) {
 	var source map[string]json.RawMessage
 	if err := json.Unmarshal(body, &source); err != nil {
 		return nil, ResponseOptions{}, fmt.Errorf("解析 Chat Completions 请求: %w", err)
@@ -17,7 +17,7 @@ func convertChatRequestWithReasoningReplay(body []byte, model string, cache *Rea
 	if err := json.Unmarshal(source["messages"], &messages); err != nil || len(messages) == 0 {
 		return nil, ResponseOptions{}, errors.New("messages 必须是非空数组")
 	}
-	input, err := convertChatMessagesWithReasoningReplay(messages, cache, scope)
+	input, err := convertChatMessagesWithReasoningReplay(messages, cache, scope, policy)
 	if err != nil {
 		return nil, ResponseOptions{}, err
 	}
@@ -105,14 +105,14 @@ type chatMessage struct {
 	Name       string          `json:"name"`
 }
 
-func convertChatMessagesWithReasoningReplay(messages []chatMessage, cache *ReasoningCache, scope string) ([]any, error) {
+func convertChatMessagesWithReasoningReplay(messages []chatMessage, cache *ReasoningCache, scope string, policy InputPolicy) ([]any, error) {
 	input := make([]any, 0, len(messages))
 	for _, message := range messages {
 		role := strings.ToLower(strings.TrimSpace(message.Role))
 		switch role {
 		case "system", "developer", "user", "assistant":
 			if !isEmptyJSON(message.Content) && !bytes.Equal(bytes.TrimSpace(message.Content), []byte("null")) {
-				content, err := convertChatContent(message.Content)
+				content, err := convertChatContent(message.Content, policy)
 				if err != nil {
 					return nil, fmt.Errorf("%s 消息内容无效: %w", role, err)
 				}
@@ -144,7 +144,7 @@ func convertChatMessagesWithReasoningReplay(messages []chatMessage, cache *Reaso
 	return input, nil
 }
 
-func convertChatContent(raw json.RawMessage) (any, error) {
+func convertChatContent(raw json.RawMessage, policy InputPolicy) (any, error) {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
 		return text, nil
@@ -171,6 +171,19 @@ func convertChatContent(raw json.RawMessage) (any, error) {
 			}
 			result = append(result, image)
 		default:
+			if (policy.Files && typeName == "file") || (policy.Audio && typeName == "input_audio") {
+				if typeName == "input_audio" {
+					result = append(result, part)
+					continue
+				}
+				var file map[string]json.RawMessage
+				if json.Unmarshal(part["file"], &file) != nil || file == nil {
+					return nil, errors.New("file 内容无效")
+				}
+				file["type"] = mustJSON("input_file")
+				result = append(result, file)
+				continue
+			}
 			return nil, fmt.Errorf("不支持 content.type=%q", typeName)
 		}
 	}
@@ -198,7 +211,7 @@ func convertChatToolOutput(raw json.RawMessage) (any, error) {
 	if !hasImage {
 		return contentAsText(raw)
 	}
-	return convertChatContent(raw)
+	return convertChatContent(raw, InputPolicy{})
 }
 
 func convertChatImagePart(part map[string]json.RawMessage) (map[string]any, error) {

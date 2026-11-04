@@ -9,14 +9,17 @@ import (
 	"testing"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
+	"github.com/chenyme/grok2api/backend/internal/domain/media"
 	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	adobeprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/adobe"
 	chatgptprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/chatgpt"
-	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/cli"
-	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/console"
+	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/cli"
+	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
+	webprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/web"
 	museprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/muse"
-	webprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/web"
+
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok"
 )
 
 func TestReadDiagnosticBodyAppliesHardLimit(t *testing.T) {
@@ -105,7 +108,7 @@ func TestProductionProviderDefinitionsMatchImplementedCapabilities(t *testing.T)
 			capabilities: []modeldomain.Capability{modeldomain.CapabilityChat, modeldomain.CapabilityImage, modeldomain.CapabilityImageEdit, modeldomain.CapabilityVideo},
 			credential:   provider.CredentialSurface{AuthType: account.AuthTypeOAuth, Import: true, Refresh: true},
 			conversation: provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, StatelessPreviousResponse: true},
-			media:        provider.MediaSurface{ImageGeneration: true, ImageEdit: true, VideoGeneration: true, ImageGenerationModelPriced: true, SingleImagePerRequest: true},
+			media:        provider.MediaSurface{ImageGeneration: true, ImageEdit: true, VideoGeneration: true, ImageGenerationModelPriced: true, SingleImagePerRequest: true, VideoReferenceVideos: true},
 			inference:    provider.InferencePolicy{Usage: provider.UsageEstimated},
 		},
 	}
@@ -120,6 +123,12 @@ func TestProductionProviderDefinitionsMatchImplementedCapabilities(t *testing.T)
 			}
 			if !reflect.DeepEqual(definition.ModelCapabilities, test.capabilities) || definition.Credential != test.credential || definition.Conversation != test.conversation || definition.Media != test.media || definition.Inference != test.inference || definition.Failure != test.failure {
 				t.Fatalf("definition capabilities = %#v", definition)
+			}
+			if definition.Media.ImageGeneration || definition.Media.ImageEdit {
+				adapter, _ := registry.Get(test.provider)
+				if _, ok := adapter.(provider.ImageRequestNormalizer); !ok {
+					t.Fatal("image provider does not own its normalization policy")
+				}
 			}
 			for _, operation := range []string{"responses", "chat", "messages"} {
 				if registry.SupportsConversation(test.provider, operation) != test.conversation.Supports(operation) {
@@ -220,7 +229,7 @@ func TestNormalizeGrokVideoRequestEditAndExtension(t *testing.T) {
 		{provider.VideoRequestOptions{Operation: extend, AspectRatio: "16:9"}, 6},
 		{provider.VideoRequestOptions{Operation: extend, Resolution: "720p"}, 6},
 	} {
-		got, err := provider.NormalizeGrokVideoRequest(test.in)
+		got, err := grok.NormalizeVideoRequest(test.in)
 		if err != nil || got.Duration != test.want || got.AspectRatio != "" || got.Resolution != "" {
 			t.Errorf("%+v = %+v, %v; want %d s", test.in, got, err, test.want)
 		}
@@ -277,5 +286,64 @@ func TestRegistryLeavesFirstFrameWithReferencesToTheProvider(t *testing.T) {
 		if err != nil || !got.HasImage || got.ReferenceImages != test.references {
 			t.Errorf("%s %s: %+v, %v; want first frame and %d references", test.value, test.upstream, got, err, test.references)
 		}
+	}
+}
+
+func TestRegistryPreservesImageInputCeilings(t *testing.T) {
+	registry := provider.NewRegistry(
+		museprovider.NewAdapter(museprovider.Config{}, nil, nil, nil, nil),
+		chatgptprovider.NewAdapter(chatgptprovider.Config{}, nil, nil, nil),
+		webprovider.NewAdapter(webprovider.Config{}, nil, nil, nil, nil),
+		consoleprovider.NewAdapter(consoleprovider.Config{}, nil, nil, nil),
+		adobeprovider.NewAdapter(adobeprovider.Config{}, nil, nil, nil, nil),
+	)
+	for _, tc := range []struct {
+		provider account.Provider
+		model    string
+		count    int
+	}{
+		{account.ProviderMuse, "muse-image", 10},
+		{account.ProviderChatGPT, "gpt-image-1.5", 8},
+		{account.ProviderWeb, "grok-imagine-image", 8},
+		{account.ProviderConsole, "grok-imagine-image-2.0", 3},
+		{account.ProviderAdobe, "gemini-flash/nano-banana-2", 14},
+		{account.ProviderAdobe, "gpt-image/2", 16},
+	} {
+		got, err := registry.NormalizeImageRequest(tc.provider, provider.ImageRequestOptions{UpstreamModel: tc.model, Edit: true, InputImages: 18, Count: 1})
+		if err != nil || got.InputImages != tc.count {
+			t.Errorf("%s: %+v %v", tc.provider, got, err)
+		}
+	}
+}
+
+type fractionalFrameAdapter struct {
+	*museprovider.Adapter
+	validated bool
+}
+
+func (a *fractionalFrameAdapter) Definition() provider.Definition {
+	d := a.Adapter.Definition()
+	d.Media.VideoKeyframes = true
+	return d
+}
+
+func (a *fractionalFrameAdapter) ValidateVideoKeyframes([]media.VideoKeyframe, int) error {
+	a.validated = true
+	return nil // This fixture's upstream has no Console 1/3-second quantization.
+}
+
+func TestKeyframeValidationDispatchesToProvider(t *testing.T) {
+	a := &fractionalFrameAdapter{Adapter: museprovider.NewAdapter(museprovider.Config{}, nil, nil, nil, nil)}
+	r := provider.NewRegistry(a)
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	frames := []media.VideoKeyframe{{ImageURL: "https://example.test/a.png", TimestampSeconds: 2.01}, {ImageURL: "https://example.test/b.png", TimestampSeconds: 2.1}}
+	if err := r.ValidateVideoKeyframes(a.Provider(), frames, 8); err != nil || !a.validated {
+		t.Fatalf("provider policy was not used: %v", err)
+	}
+	console := provider.NewRegistry(consoleprovider.NewAdapter(consoleprovider.Config{}, nil, nil, nil))
+	if err := console.ValidateVideoKeyframes(account.ProviderConsole, frames, 8); !errors.Is(err, provider.ErrVideoParameterInvalid) {
+		t.Fatalf("Console quantization was lost: %v", err)
 	}
 }

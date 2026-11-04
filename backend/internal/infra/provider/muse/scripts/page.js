@@ -204,14 +204,32 @@
     return this.userCount() > users || (!!ta && ta.value === '');
   },
 
+  // Old composers used a form; newer ones put the textarea and attachments
+  // in sibling divs. Never fall back to the whole page (history has inputs too).
+  composerRoots() {
+    const ta = document.querySelector('textarea');
+    if (!ta) return [];
+    const form = ta.closest('form');
+    if (form) return [form];
+    const roots = [];
+    for (let el = ta.parentElement; el && el !== document.body && roots.length < 4; el = el.parentElement) roots.push(el);
+    return roots;
+  },
+  composerElements(selector, accept = () => true) {
+    for (const root of this.composerRoots()) {
+      const elements = [...root.querySelectorAll(selector)].filter((e) =>
+        accept(e) && !e.closest('[class*="hatch-chat-groupable-bubble"],[class*="chat-user-bubble"],[class*="group/msg"]'));
+      if (elements.length) return elements;
+    }
+    return [];
+  },
   removeButtons() {
-    return [...document.querySelectorAll('button[aria-label]')]
-      .filter((b) => /remove\s*attachment|移除附件|删除附件/i.test(b.getAttribute('aria-label')));
+    return this.composerElements('button[aria-label]', (b) => /remove\s*attachment|移除附件|删除附件/i.test(b.getAttribute('aria-label')));
   },
   clearAttachments() { const b = this.removeButtons(); b.forEach((x) => x.click()); return b.length; },
   // attachmentCount is -1 while a file is still processing (its preview sits
   // in a role=status wrapper and Send stays disabled).
-  attachmentCount() { return document.querySelector('[role=status] :is(img,video)') ? -1 : this.removeButtons().length; },
+  attachmentCount() { return this.composerElements('[role=status] :is(img,video)').length ? -1 : this.removeButtons().length; },
   putChunk(key, b64) {
     const bin = atob(b64);
     const u = new Uint8Array(bin.length);
@@ -221,7 +239,7 @@
   },
   // attach puts the parked files into the composer's file input.
   attach(files) {
-    const input = document.querySelector('input[type=file]');
+    const input = this.composerElements('input[type=file]')[0];
     if (!input) return 'no file input';
     const dt = new DataTransfer();
     for (const f of files) {

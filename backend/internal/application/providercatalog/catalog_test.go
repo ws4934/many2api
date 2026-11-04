@@ -10,7 +10,7 @@ import (
 	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/chatgpt"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/cli"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/cli"
 )
 
 type definedAdapter struct{ definition provider.Definition }

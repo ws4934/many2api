@@ -21,7 +21,7 @@ import (
 
 var scope = egressdomain.Scope(account.ProviderMuse)
 
-// RemoteFetcher downloads a client's https input image (with SSRF protection).
+// RemoteFetcher downloads a client's https attachment (with SSRF protection).
 type RemoteFetcher func(ctx context.Context, rawURL string) ([]byte, error)
 
 // AssetStore archives generated images and videos where the gateway serves them.

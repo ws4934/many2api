@@ -226,8 +226,6 @@ func (s *Service) CreateImageJob(ctx context.Context, input ImageJobInput) (medi
 		return media.Job{}, &ImageRequestRejectedError{Err: errors.New("prompt 不能为空")}
 	case len(input.Prompt) > 100000:
 		return media.Job{}, &ImageRequestRejectedError{Err: errors.New("prompt 过长")}
-	case len(input.ImageURLs) > media.MaxInputImages:
-		return media.Job{}, &ImageRequestRejectedError{Err: fmt.Errorf("最多支持 %d 张输入图片", media.MaxInputImages)}
 	}
 	inputJSON, err := json.Marshal(imageJobInputs{ImageURLs: input.ImageURLs, MaskURL: input.MaskURL})
 	if err != nil {
@@ -263,21 +261,34 @@ func (s *Service) CreateImageJob(ctx context.Context, input ImageJobInput) (medi
 		Edit: edit, Count: 1, InputImages: len(input.ImageURLs), HasMask: input.MaskURL != "",
 		Size: input.Size, Quality: input.Quality, OutputFormat: input.OutputFormat, Background: input.Background,
 	}
+	clientParameters := imageJobParameters(input)
 	var rejection error
+	effectiveOptions := make(map[uint64]provider.ImageRequestOptions, len(routes))
+	eligible := make([]modeldomain.Route, 0, len(routes))
 	supports := func(providerValue accountdomain.Provider) bool {
-		if _, ok := s.providers.AsyncImages(providerValue); !ok {
-			return false
-		}
-		validator, ok := s.providers.ImageRequestValidator(providerValue)
-		if !ok {
-			return true
-		}
-		err := validator.ValidateImageRequest(options)
-		if err != nil && rejection == nil {
-			rejection = &ImageRequestRejectedError{Err: err}
-		}
-		return err == nil
+		_, ok := s.providers.AsyncImages(providerValue)
+		return ok
 	}
+	for _, candidate := range routes {
+		if candidate.Capability != capability || !supports(candidate.Provider) {
+			continue
+		}
+		candidateOptions := options
+		candidateOptions.UpstreamModel = candidate.UpstreamModel
+		normalized, err := s.providers.NormalizeImageRequest(candidate.Provider, candidateOptions)
+		if err != nil {
+			if rejection == nil {
+				rejection = &ImageRequestRejectedError{Err: err}
+			}
+			continue
+		}
+		eligible = append(eligible, candidate)
+		effectiveOptions[candidate.ID] = normalized
+	}
+	if len(eligible) == 0 && rejection != nil {
+		return media.Job{}, rejection
+	}
+	routes = eligible
 	route, selection, err := s.selectSchedulableMediaRouteWithQuotaMode(ctx, routes, input.ClientKey, capability, true, supports, func(route modeldomain.Route) string {
 		return s.providers.ImageQuotaMode(route.Provider, route.UpstreamModel, edit)
 	})
@@ -287,6 +298,14 @@ func (s *Service) CreateImageJob(ctx context.Context, input ImageJobInput) (medi
 		}
 		return media.Job{}, err
 	}
+	options = effectiveOptions[route.ID]
+	if options.InputImages > media.MaxImageJobInputs {
+		return media.Job{}, &ImageRequestRejectedError{Err: fmt.Errorf("图片任务最多存储 %d 张输入图片", media.MaxImageJobInputs)}
+	}
+	input.ImageURLs = input.ImageURLs[:options.InputImages]
+	input.Size, input.Quality = options.Size, options.Quality
+	input.OutputFormat, input.Background = options.OutputFormat, options.Background
+	params.OutputFormat, params.Background = options.OutputFormat, options.Background
 	if err := s.checkLedgerReady(); err != nil {
 		return media.Job{}, err
 	}
@@ -327,7 +346,7 @@ func (s *Service) CreateImageJob(ctx context.Context, input ImageJobInput) (medi
 		return media.Job{}, err
 	}
 	now := time.Now().UTC()
-	_, parameters := requestparams.Start(ctx, imageJobParameters(input))
+	_, parameters := requestparams.Start(ctx, clientParameters)
 	parameters.SetEffectiveModel(imageJobParameters(input), route.UpstreamModel)
 	job := media.Job{
 		ID: ImageJobIDPrefix + token, Kind: media.KindImage, RequestID: input.RequestID,

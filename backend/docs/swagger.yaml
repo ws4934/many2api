@@ -280,6 +280,9 @@ definitions:
           $ref: '#/definitions/httpserver.SwaggerVideoMediaInput'
         type: array
       reference_videos:
+        description: 'Adobe Seedance: up to 3 MP4/MOV clips, no first/last frame.
+          Muse: MP4/MOV/WebM, up to 120s each; first frame, images and videos total
+          at most 10 attachments / 100 MiB. Each file is limited to 20 MiB.'
         items:
           $ref: '#/definitions/httpserver.SwaggerVideoMediaInput'
         type: array

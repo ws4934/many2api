@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -108,6 +109,44 @@ func (a *asyncImageAdapter) FetchImage(context.Context, provider.ImageJobRequest
 }
 
 type statusError struct{ status int }
+
+type imagePolicyFixture struct{ *asyncImageAdapter }
+
+func (a *imagePolicyFixture) NormalizeImageRequest(o provider.ImageRequestOptions) (provider.ImageRequestOptions, error) {
+	o.InputImages = min(o.InputImages, 4)
+	o.Quality = "low"
+	return o, nil
+}
+
+func TestImageJobNormalizesBeforeStagingAndKeepsClientParameters(t *testing.T) {
+	f := newImageJobFixture(t, 1)
+	f.service.providers = provider.NewRegistry(&imagePolicyFixture{f.adapter})
+	refs := []string{"https://example.test/1.png", "https://example.test/2.png", "https://example.test/3.png", "https://example.test/4.png"}
+	// These discarded inputs must not be decoded or staged.
+	for range 8 {
+		refs = append(refs, "data:image/png;base64,broken")
+	}
+	job := f.create(t, ImageJobInput{ImageURLs: refs, Quality: "high", IdempotencyKey: "normalized-image"})
+	var inputs imageJobInputs
+	if err := json.Unmarshal([]byte(job.InputJSON), &inputs); err != nil {
+		t.Fatal(err)
+	}
+	if job.InputImageCount != 4 || len(inputs.ImageURLs) != 4 || job.Quality != "low" {
+		t.Fatalf("job=%+v inputs=%+v", job, inputs)
+	}
+	parameters := job.RequestParameters.Data()
+	if parameters.Client == nil || parameters.Effective == nil || !bytes.Contains(parameters.Client.Values, []byte(`"quality":"high"`)) || !bytes.Contains(parameters.Effective.Values, []byte(`"quality":"low"`)) {
+		t.Fatalf("client/effective parameters were conflated: %+v", parameters)
+	}
+	// Idempotency remains keyed to the original request, not its truncated form.
+	again := f.create(t, ImageJobInput{ImageURLs: refs, Quality: "high", IdempotencyKey: "normalized-image"})
+	if again.ID != job.ID {
+		t.Fatal("normalization broke idempotency")
+	}
+	if len(f.adapter.Calls()) != 0 {
+		t.Fatal("admission invoked upstream generation")
+	}
+}
 
 func (e statusError) Error() string       { return fmt.Sprintf("upstream status %d", e.status) }
 func (e statusError) HTTPStatusCode() int { return e.status }

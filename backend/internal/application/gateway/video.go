@@ -152,7 +152,7 @@ func (s *Service) CreateVideo(ctx context.Context, input VideoInput) (media.Job,
 		return media.Job{}, err
 	}
 	input.Duration, input.AspectRatio, input.Resolution = effective.Duration, effective.AspectRatio, effective.Resolution
-	if err := provider.ValidateVideoKeyframes(inputs.keyframes, effective.Duration); err != nil {
+	if err := s.providers.ValidateVideoKeyframes(route.Provider, inputs.keyframes, effective.Duration); err != nil {
 		return media.Job{}, err
 	}
 	inputs = inputs.fittedTo(effective)

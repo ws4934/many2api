@@ -39,6 +39,22 @@ func (a *Adapter) ValidateImageRequest(options provider.ImageRequestOptions) err
 	return nil
 }
 
+// NormalizeImageRequest exposes the model's reference budget before routing,
+// pricing or staging inputs, for both synchronous requests and durable jobs.
+func (a *Adapter) NormalizeImageRequest(o provider.ImageRequestOptions) (provider.ImageRequestOptions, error) {
+	v, err := a.imageModel(o.UpstreamModel)
+	if err != nil {
+		return o, err
+	}
+	o.InputImages = v.keptImageCount(o.InputImages, o.HasMask)
+	in, err := v.imagePlan("", o.Size, o.AspectRatio, o.Resolution, o.Quality, o.Background, o.Count, o.InputImages, o.HasMask)
+	if err != nil {
+		return o, err
+	}
+	o.Count = in.count
+	return o, nil
+}
+
 // --- 同步图像（ImageGenerationAdapter / ImageEditAdapter）---
 
 func (a *Adapter) GenerateImage(ctx context.Context, request provider.ImageGenerationRequest) (*provider.Response, error) {

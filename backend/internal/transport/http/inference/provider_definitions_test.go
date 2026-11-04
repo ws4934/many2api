@@ -2,9 +2,9 @@ package inference
 
 import (
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/cli"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/console"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/web"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/cli"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/web"
 )
 
 // grokDefinitions returns the production declarations of the Grok providers.

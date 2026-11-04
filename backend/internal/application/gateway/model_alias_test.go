@@ -10,7 +10,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/domain/audit"
 	modeldomain "github.com/chenyme/grok2api/backend/internal/domain/model"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
-	"github.com/chenyme/grok2api/backend/internal/infra/provider/console"
+	"github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/conversation"
 	"github.com/chenyme/grok2api/backend/internal/repository"
 )

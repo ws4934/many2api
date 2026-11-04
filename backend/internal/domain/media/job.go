@@ -37,8 +37,9 @@ const (
 // Keep the relational CHECK constraint and gateway encode guard aligned with this value.
 const MaxInputJSONBytes = 32 << 20
 
-// MaxInputImages is the input-image ceiling for image jobs and Build video references.
-const MaxInputImages = 8
+// MaxImageJobInputs is a persistence safety ceiling, not a provider capability.
+// Each provider normalizes its native reference budget before inputs are staged.
+const MaxImageJobInputs = 20
 
 // MaxVideoReferenceImages admits the largest supported video reference set.
 const MaxVideoReferenceImages = 14

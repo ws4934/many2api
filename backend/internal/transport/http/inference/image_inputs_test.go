@@ -18,6 +18,46 @@ const onePixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mN
 
 const onePixelDataURI = "data:image/png;base64," + onePixelPNG
 
+var benchmarkImageURL string
+
+func TestImageInputURLKeepsPayloadAndCanonicalizesBareBase64(t *testing.T) {
+	upperHeader := "DATA:IMAGE/PNG;BASE64," + onePixelPNG
+	wrapped := onePixelPNG[:24] + "\r\n" + onePixelPNG[24:]
+	for _, tc := range []struct{ input, want string }{
+		{upperHeader, upperHeader},
+		{onePixelDataURI, onePixelDataURI},
+		{onePixelPNG, onePixelDataURI},
+		{wrapped, onePixelDataURI},
+	} {
+		got, err := imageInputURL(tc.input)
+		if err != nil || got != tc.want {
+			t.Fatalf("input normalization: got %q, %v; want %q", got, err, tc.want)
+		}
+	}
+	if _, err := imageInputURL(onePixelPNG + "!"); err == nil {
+		t.Fatal("invalid base64 tail accepted")
+	}
+}
+
+func BenchmarkImageInputURL(b *testing.B) {
+	raw := make([]byte, 1<<20)
+	copy(raw, "\x89PNG\r\n\x1a\n")
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	for _, tc := range []struct{ name, value string }{{"data_uri", "data:image/png;base64," + encoded}, {"bare_base64", encoded}} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(tc.value)))
+			for i := 0; i < b.N; i++ {
+				var err error
+				benchmarkImageURL, err = imageInputURL(tc.value)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func readImageEditForTest(t *testing.T, request *http.Request) (imageEditJSONRequest, []string, []string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -106,7 +146,7 @@ func TestImageEditRejectsUnsupportedInputs(t *testing.T) {
 			t.Errorf("%s: status=%d error=%v", name, status, problem)
 		}
 	}
-	// Extra masks and images beyond eight are dropped, not refused.
+	// Extra masks are dropped; image budgets belong to the selected provider.
 	for name, body := range map[string]string{
 		"two masks":   `{"model":"m","prompt":"p","image":"` + onePixelDataURI + `","mask":["` + onePixelDataURI + `","` + onePixelDataURI + `"]}`,
 		"nine images": `{"model":"m","prompt":"p","images":["` + strings.Repeat(onePixelDataURI+`","`, 8) + onePixelDataURI + `"]}`,

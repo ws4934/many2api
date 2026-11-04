@@ -78,6 +78,11 @@ func (a *Adapter) EditImage(ctx context.Context, request provider.ImageEditReque
 // and output parameters are adapted, never refused (see adapted);
 // partial_images is accepted and ignored: the Web tool sends no intermediate
 // frames.
+func (*Adapter) NormalizeImageRequest(o provider.ImageRequestOptions) (provider.ImageRequestOptions, error) {
+	o.InputImages = min(o.InputImages, 8)
+	return o, nil
+}
+
 func (a *Adapter) ValidateImageRequest(o provider.ImageRequestOptions) error {
 	switch {
 	case o.Count < 0 || o.Count > 10:

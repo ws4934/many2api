@@ -138,6 +138,11 @@ func (r *Registry) Validate() error {
 				return fmt.Errorf("Provider %s 声明对话能力但未实现适配器", value)
 			}
 		}
+		if definition.Media.VideoKeyframes {
+			if _, ok := adapter.(VideoKeyframeValidator); !ok {
+				return fmt.Errorf("Provider %s 声明关键帧能力但未实现时间校验接口", value)
+			}
+		}
 		if _, ok := adapter.(ModelCatalogAdapter); !ok {
 			return fmt.Errorf("Provider %s 未实现模型目录适配器", value)
 		}

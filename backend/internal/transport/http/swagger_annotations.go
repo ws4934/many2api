@@ -83,8 +83,9 @@ type SwaggerImageEditRequest struct {
 // Console 1.5 可同时使用 image、14 张 reference_images、last_frame 与 4 张 keyframes，总输入图最多 20 张。
 // Console 1.5 的 last_frame 可单独使用，有首帧、尾帧或关键帧时 prompt 可省略；Adobe 尾帧要求同时提供 image。
 // Muse 与 Adobe kling-3.0-omni 也支持首帧与参考图组合，经典 Console / Build 保留首帧。
-// reference_videos（参考视频，url 或 file_id，MP4/QuickTime，最多 10 个）需提供 prompt，
-// 目前仅 Adobe 的 Seedance 接受（不能与首尾帧同用）。
+// reference_videos（参考视频，url 或 file_id，单个最多 20 MiB）需提供 prompt。
+// Adobe Seedance 接受最多 3 个 MP4/QuickTime，不能与首尾帧同用；Muse 接受 MP4/MOV/WebM，
+// 每个不超过 120 秒，可与首帧、参考图同用，全部附件合计最多 10 个、100 MiB。
 // 编辑与延长（/v1/videos/edits、/v1/videos/extensions）需 prompt 与 video：Grok 走 Console
 // 的 grok-imagine-video（编辑不收 duration、比例、分辨率；延长 2–10 秒，默认 6）；Adobe 的
 // seedance-2.5 支持编辑与延长（延长 4–30 秒），kling-3.0-omni 支持编辑。
@@ -104,6 +105,7 @@ type SwaggerVideoGenerationRequest struct {
 	// Reference images: Console 1.5 accepts 14 alongside image; classic Console accepts 7, Build 8, both exclusive with image. Extra inputs are trimmed.
 	ReferenceImages []SwaggerVideoMediaInput `json:"reference_images,omitempty"`
 	ReferenceAudios []SwaggerVideoAudioInput `json:"reference_audios,omitempty"`
+	// Adobe Seedance: up to 3 MP4/MOV clips, no first/last frame. Muse: MP4/MOV/WebM, up to 120s each; first frame, images and videos total at most 10 attachments / 100 MiB. Each file is limited to 20 MiB.
 	ReferenceVideos []SwaggerVideoMediaInput `json:"reference_videos,omitempty"`
 	Video           *SwaggerVideoMediaInput  `json:"video,omitempty"`
 }

@@ -23,7 +23,7 @@ import (
 	accountdomain "github.com/chenyme/grok2api/backend/internal/domain/account"
 	"github.com/chenyme/grok2api/backend/internal/infra/persistence/relational"
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
-	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/cli"
+	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/cli"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
 	"github.com/chenyme/grok2api/backend/internal/infra/security"
 	"github.com/chenyme/grok2api/backend/internal/repository"

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
-	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/console"
+	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
 )
 
 func TestConsoleRoutesUseStableProviderNamespace(t *testing.T) {

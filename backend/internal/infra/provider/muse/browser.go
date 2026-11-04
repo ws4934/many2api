@@ -43,7 +43,7 @@ func newBrowserEngine(cfg func() Config, logger func() *slog.Logger) *browserEng
 func (e *browserEngine) Chat(ctx context.Context, s session, turn chatTurn, onText func(string) error) (string, error) {
 	var reply string
 	err := e.withPage(ctx, chatTimeout, s, "/thread/new", func(ctx context.Context, p *page) error {
-		if err := p.attach(ctx, turn.Images); err != nil {
+		if err := p.attach(ctx, turn.Inputs); err != nil {
 			return err
 		}
 		sentAt, err := p.send(ctx, turn.Prompt)
@@ -87,12 +87,8 @@ func (e *browserEngine) Generate(ctx context.Context, s session, job mediaJob) (
 				job.OnSent()
 			}
 		}
-		found, err := p.waitMedia(ctx, job, baseline, sentAt)
-		if err != nil {
-			return err
-		}
-		file, err = p.download(ctx, found.Src)
-		file.Width, file.Height = found.W, found.H
+		var err error
+		file, err = p.waitGeneratedMedia(ctx, job, baseline, sentAt)
 		return err
 	})
 	return file, err

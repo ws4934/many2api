@@ -96,8 +96,9 @@ func (h *Handler) editImage(c *gin.Context) {
 		writeOpenAIError(c, http.StatusBadRequest, "invalid_request", "图片编辑需要至少一张 image")
 		return
 	}
-	// Images beyond the 8 an edit takes, and masks after the first, are dropped.
-	imageURLs, maskURLs = imageURLs[:min(len(imageURLs), maxEditImages)], maskURLs[:min(len(maskURLs), 1)]
+	// Providers choose their image budget after model resolution. An early
+	// truncation here loses valid inputs for larger native reference sets.
+	maskURLs = maskURLs[:min(len(maskURLs), 1)]
 	if model == "" || prompt == "" {
 		writeOpenAIError(c, http.StatusBadRequest, "invalid_request", "图片编辑缺少有效 model 或 prompt")
 		return
@@ -126,9 +127,6 @@ func (h *Handler) editImage(c *gin.Context) {
 	}
 	h.writeResult(c, result, request.Stream, streamProtocolImage)
 }
-
-// maxEditImages is the most source images an edit takes.
-const maxEditImages = 8
 
 // imageCounts maps n and partial_images into the ranges the routes take
 // instead of refusing them: n to 1–10 (1 when streaming), partial images to

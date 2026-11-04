@@ -33,8 +33,15 @@ type fifteenImageMediaJobModel struct {
 
 func (fifteenImageMediaJobModel) TableName() string { return "media_jobs" }
 
+type twentyVideoEightImageJobModel struct {
+	mediaJobModel
+	InputImageCount int `gorm:"not null;default:0;check:chk_media_jobs_input_image_count,input_image_count BETWEEN 0 AND 20 AND (kind <> 'image' OR input_image_count <= 8)"`
+}
+
+func (twentyVideoEightImageJobModel) TableName() string { return "media_jobs" }
+
 func TestSQLiteMediaJobInputConstraintUpgradePreservesData(t *testing.T) {
-	for _, limit := range []int{8, 15} {
+	for _, limit := range []int{8, 15, 20} {
 		t.Run(strconv.Itoa(limit), func(t *testing.T) {
 			verifyMediaJobInputConstraintUpgrade(t, openTestDatabase(t), limit)
 		})
@@ -42,7 +49,7 @@ func TestSQLiteMediaJobInputConstraintUpgradePreservesData(t *testing.T) {
 }
 
 func TestPostgresMediaJobInputConstraintUpgradePreservesData(t *testing.T) {
-	for _, limit := range []int{8, 15} {
+	for _, limit := range []int{8, 15, 20} {
 		t.Run(strconv.Itoa(limit), func(t *testing.T) { verifyPostgresMediaJobInputConstraintUpgrade(t, limit) })
 	}
 }
@@ -95,6 +102,9 @@ func verifyMediaJobInputConstraintUpgrade(t *testing.T, database *Database, oldL
 		var oldModel any = &eightImageMediaJobModel{}
 		if oldLimit == 15 {
 			oldModel = &fifteenImageMediaJobModel{}
+		}
+		if oldLimit == 20 {
+			oldModel = &twentyVideoEightImageJobModel{}
 		}
 		return db.Migrator().CreateConstraint(oldModel, mediaJobInputImageConstraint)
 	}
@@ -189,11 +199,11 @@ func verifyMediaJobInputConstraintUpgrade(t *testing.T, database *Database, oldL
 	if err := setCount(media.MaxVideoInputImages+1, media.KindVideo); err == nil {
 		t.Fatal("video accepted inputs beyond its ceiling")
 	}
-	if err := setCount(9, media.KindImage); err == nil {
-		t.Fatal("image accepted nine inputs")
+	if err := setCount(media.MaxImageJobInputs+1, media.KindImage); err == nil {
+		t.Fatal("image accepted inputs beyond storage ceiling")
 	}
-	if err := setCount(8, media.KindImage); err != nil {
-		t.Fatalf("image ceiling changed: %v", err)
+	if err := setCount(media.MaxImageJobInputs, media.KindImage); err != nil {
+		t.Fatalf("image storage ceiling: %v", err)
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
 		duplicate := job
