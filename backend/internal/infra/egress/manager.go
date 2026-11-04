@@ -140,6 +140,7 @@ func (l *Lease) Release() {
 }
 
 type Manager struct {
+	browserProxyConfig     BrowserProxyConfig
 	repository             repository.EgressRepository
 	cipher                 *security.Cipher
 	logger                 *slog.Logger

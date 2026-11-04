@@ -21,6 +21,8 @@ import (
 )
 
 const (
+	BrowserProxyListenHostEnv     = "GROK2API_BROWSER_PROXY_LISTEN_HOST"
+	BrowserProxyAdvertiseHostEnv  = "GROK2API_BROWSER_PROXY_ADVERTISE_HOST"
 	DatabaseURLEnv                = "GROK2API_DATABASE_URL"
 	ClearanceModeManual           = "manual"
 	ClearanceModeFlareSolverr     = "flaresolverr"
@@ -49,6 +51,7 @@ var buildForbiddenCodePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{
 
 // Config 表示后端运行配置。
 type Config struct {
+	BrowserProxy      BrowserProxyConfig      `yaml:"browserProxy"`
 	Server            ServerConfig            `yaml:"server"`
 	Frontend          FrontendConfig          `yaml:"frontend"`
 	Database          DatabaseConfig          `yaml:"database"`
@@ -433,6 +436,12 @@ func Load(path string) (Config, error) {
 // overrides after YAML and before CLI overrides. Empty values are ignored so
 // Compose can pass an optional variable without changing existing deployments.
 func applyEnvironmentOverrides(cfg *Config) error {
+	if value := strings.TrimSpace(os.Getenv(BrowserProxyListenHostEnv)); value != "" {
+		cfg.BrowserProxy.ListenHost = value
+	}
+	if value := strings.TrimSpace(os.Getenv(BrowserProxyAdvertiseHostEnv)); value != "" {
+		cfg.BrowserProxy.AdvertiseHost = value
+	}
 	value := strings.TrimSpace(os.Getenv(DatabaseURLEnv))
 	if value == "" {
 		return nil
@@ -486,6 +495,9 @@ func resolveRelativePaths(cfg *Config, configPath string) error {
 
 // Validate 校验启动所需的安全配置和运行边界。
 func (c Config) Validate() error {
+	if err := c.BrowserProxy.Validate(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(c.Server.Listen) == "" {
 		return errors.New("server.listen 不能为空")
 	}

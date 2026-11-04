@@ -3,6 +3,7 @@ package egress
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -99,15 +100,19 @@ func newBrowserClient(proxyURL, userAgent string) (*browserClient, error) {
 	return &browserClient{inner: client}, nil
 }
 
-// ConnectDialContext tunnels through an HTTP proxy with CONNECT. The dial and
+// ConnectDialContext tunnels through an HTTP(S) proxy with CONNECT. The dial and
 // the proxy handshake end with ctx and within direct.Timeout.
 func ConnectDialContext(proxy *url.URL, direct *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
 	host := proxy.Host
 	if proxy.Port() == "" {
-		host = net.JoinHostPort(proxy.Hostname(), "80")
+		port := "80"
+		if proxy.Scheme == "https" {
+			port = "443"
+		}
+		host = net.JoinHostPort(proxy.Hostname(), port)
 	}
 	authorization := ""
-	if proxy.User != nil && proxy.User.Username() != "" {
+	if proxy.User != nil {
 		password, _ := proxy.User.Password()
 		authorization = "Basic " + base64.StdEncoding.EncodeToString([]byte(proxy.User.Username()+":"+password))
 	}
@@ -116,20 +121,31 @@ func ConnectDialContext(proxy *url.URL, direct *net.Dialer) func(context.Context
 		if err != nil {
 			return nil, err
 		}
-		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+		// Capture the raw socket: TLS replaces conn below and cancellation must
+		// not race that assignment.
+		raw := conn
+		stop := context.AfterFunc(ctx, func() { _ = raw.Close() })
+		if err = conn.SetDeadline(time.Now().Add(direct.Timeout)); err == nil && proxy.Scheme == "https" {
+			secure := tls.Client(conn, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: proxy.Hostname(), NextProtos: []string{"http/1.1"}})
+			err = secure.HandshakeContext(ctx)
+			conn = secure
+		}
 		request := &http.Request{Method: http.MethodConnect, URL: &url.URL{Opaque: address}, Host: address, Header: make(http.Header)}
 		if authorization != "" {
 			request.Header.Set("Proxy-Authorization", authorization)
 		}
-		if err = conn.SetDeadline(time.Now().Add(direct.Timeout)); err == nil {
+		if err == nil {
 			err = request.Write(conn)
 		}
 		if err == nil {
-			// The target speaks only after the client, so the reader holds
-			// nothing past the proxy's response.
+			// Bound proxy response headers and preserve any coalesced target bytes.
+			reader := bufio.NewReader(io.LimitReader(conn, 64<<10))
 			var response *http.Response
-			if response, err = http.ReadResponse(bufio.NewReader(conn), request); err == nil && response.StatusCode != http.StatusOK {
+			if response, err = http.ReadResponse(reader, request); err == nil && response.StatusCode != http.StatusOK {
 				err = fmt.Errorf("代理 CONNECT 返回 %s", response.Status)
+			}
+			if err == nil {
+				conn = &bufferedProxyConn{Conn: conn, reader: io.MultiReader(reader, conn)}
 			}
 		}
 		if !stop() {
@@ -145,6 +161,13 @@ func ConnectDialContext(proxy *url.URL, direct *net.Dialer) func(context.Context
 		return conn, nil
 	}
 }
+
+type bufferedProxyConn struct {
+	net.Conn
+	reader io.Reader
+}
+
+func (c *bufferedProxyConn) Read(b []byte) (int, error) { return c.reader.Read(b) }
 
 func browserProfile(userAgent string) profiles.ClientProfile {
 	match := chromeMajorPattern.FindStringSubmatch(strings.TrimSpace(userAgent))

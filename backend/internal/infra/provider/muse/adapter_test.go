@@ -516,19 +516,6 @@ func TestGenerateVideoCheckpoints(t *testing.T) {
 	}
 }
 
-func TestBrowserProxy(t *testing.T) {
-	for raw, want := range map[string]string{"": "", "http://10.0.0.1:8080": "http://10.0.0.1:8080", "socks5h://warp:1080": "socks5://warp:1080"} {
-		if got, err := browserProxy(raw); err != nil || got != want {
-			t.Fatalf("%q = %q, %v", raw, got, err)
-		}
-	}
-	for _, raw := range []string{"http://user:pass@proxy:8080", "trojan://secret@host:443", "vless://id@host:443"} {
-		if _, err := browserProxy(raw); err == nil {
-			t.Fatalf("%q was accepted", raw)
-		}
-	}
-}
-
 func TestAspectLabel(t *testing.T) {
 	for size, want := range map[string]string{"1024x1024": "1:1 (square)", "1024x1536": "2:3 (portrait)", "auto": "", "": ""} {
 		if got := aspectLabel(size); got != want {

@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 
@@ -93,11 +92,15 @@ func (a *Adapter) withSession(ctx context.Context, credential account.Credential
 		return err
 	}
 	defer lease.Release()
-	proxy, err := browserProxy(lease.ProxyURL)
+	proxy, err := a.egress.AcquireBrowserProxy(ctx, lease)
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return &museError{status: http.StatusServiceUnavailable, code: "browser_proxy_unavailable", message: err.Error(), requestScoped: true}
 	}
-	return fn(ctx, session{Cookies: jar, ProxyServer: proxy, Identity: a.identityOf(credential), Timezone: usTimezones[credential.ID%uint64(len(usTimezones))]})
+	defer proxy.Release()
+	return fn(ctx, session{Cookies: jar, ProxyServer: proxy.ProxyServer, Identity: a.identityOf(credential), Timezone: usTimezones[credential.ID%uint64(len(usTimezones))]})
 }
 
 // identityOf is the browser identity stored with the account. An account
@@ -114,33 +117,6 @@ func (a *Adapter) identityOf(credential account.Credential) browserIdentity {
 		}
 	}
 	return browserIdentities[credential.ID%uint64(len(browserIdentities))]
-}
-
-// browserProxy turns an egress proxy URL into Chrome's proxyServer. Chrome
-// takes no proxy credentials on the command and speaks none of the tunnel
-// protocols, like FlareSolverr.
-func browserProxy(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", nil
-	}
-	unsupported := &museError{status: http.StatusServiceUnavailable, code: "egress_unsupported",
-		message: "Muse 浏览器只能使用无认证的 HTTP、HTTPS、SOCKS4 或 SOCKS5 出口，不支持带账号密码的代理和 Trojan、VLESS、SS、VMess 隧道"}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" || parsed.User != nil {
-		return "", unsupported
-	}
-	scheme := strings.ToLower(parsed.Scheme)
-	switch scheme {
-	case "socks5h":
-		scheme = "socks5"
-	case "socks4a":
-		scheme = "socks4"
-	case "http", "https", "socks4", "socks5":
-	default:
-		return "", unsupported
-	}
-	return scheme + "://" + parsed.Host, nil
 }
 
 // jar decrypts a stored cookie jar.

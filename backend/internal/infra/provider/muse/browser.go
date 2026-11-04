@@ -145,6 +145,7 @@ func (e *browserEngine) openAndRun(ctx context.Context, s session, path string, 
 	params := map[string]any{"disposeOnDetach": true}
 	if s.ProxyServer != "" {
 		params["proxyServer"] = s.ProxyServer
+		params["proxyBypassList"] = "<-loopback>"
 	}
 	err = conn.call(setup, "", "Target.createBrowserContext", params, &bc)
 	cancel()

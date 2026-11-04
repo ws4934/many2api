@@ -46,8 +46,8 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/provider/chatgpt"
 	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/cli"
 	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/console"
-	museprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/muse"
 	webprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/grok/web"
+	museprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/muse"
 	infraqualityguard "github.com/chenyme/grok2api/backend/internal/infra/qualityguard"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
 	redisruntime "github.com/chenyme/grok2api/backend/internal/infra/runtime/redis"
@@ -228,6 +228,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (_ *Applic
 	mediaService := mediaapp.NewServiceWithTickets(mediaAssetRepo, mediaJobRepo, mediaUploadTicketRepo, localMediaStore, refreshLock, mediaConfig(cfg))
 
 	egressManager := infraegress.NewManager(egressRepo, cipher)
+	egressManager.SetBrowserProxyConfig(infraegress.BrowserProxyConfig{ListenHost: cfg.BrowserProxy.ListenHost, AdvertiseHost: cfg.BrowserProxy.AdvertiseHost})
 	egressManager.SetLogger(logger)
 	egressManager.SetClearanceLock(refreshLock)
 	egressManager.UpdateClearanceConfig(clearanceConfig(cfg))

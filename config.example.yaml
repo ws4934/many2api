@@ -19,6 +19,14 @@ server:
   # [按需修改] 仅在本地或受信任环境开启，生产环境保持 false。
   swaggerEnabled: false
 
+# [按需修改] 浏览器认证代理中转，部署配置，修改后重启后端。
+# Compose 用环境变量自动设为 grok2api-browser-relay，无需手改。
+# 非容器、同机 Chrome 用默认回环；远端 Chrome 需改为双方互通的受信任专用网卡。
+# 中转无入站认证：不要绑定公网接口、不要对外发布端口。
+browserProxy:
+  listenHost: "127.0.0.1"
+  advertiseHost: "127.0.0.1"
+
 auth:
   # [通常不要修改] 管理端访问与刷新令牌有效期。
   accessTokenTTL: 15m
