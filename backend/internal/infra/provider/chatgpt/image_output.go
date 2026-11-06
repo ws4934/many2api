@@ -17,8 +17,11 @@ import (
 // ImageOutputOptions describes output properties, never an editing operation.
 // Defaults follow Images API: background=auto and output_format=png.
 type ImageOutputOptions struct {
-	Background   string `json:"background,omitempty"`
-	OutputFormat string `json:"output_format,omitempty"`
+	Complexity      string `json:"complexity,omitempty"`
+	FrameCount      *int   `json:"frame_count,omitempty"`
+	FrameDurationMS *int   `json:"frame_duration_ms,omitempty"`
+	Background      string `json:"background,omitempty"`
+	OutputFormat    string `json:"output_format,omitempty"`
 	// Size is the requested WIDTHxHEIGHT, stated in the prompt only, with the
 	// client's AspectRatio and Resolution when it gave them.
 	Size        string `json:"size,omitempty"`
@@ -40,12 +43,12 @@ func (o ImageOutputOptions) Validate() error {
 		return &ImageOptionError{Param: "background", Message: "background must be auto, transparent, or opaque"}
 	}
 	switch o.OutputFormat {
-	case "", "png", "jpeg", "webp":
+	case "", "png", "jpeg", "webp", "gif":
 	default:
-		return &ImageOptionError{Param: "output_format", Message: "output_format must be png, jpeg, or webp"}
+		return &ImageOptionError{Param: "output_format", Message: "output_format must be png, jpeg, webp, or gif"}
 	}
-	if o.Background == "transparent" && o.OutputFormat == "jpeg" {
-		return &ImageOptionError{Param: "output_format", Message: "background=transparent requires output_format=png or webp; jpeg does not support transparency"}
+	if o.Background == "transparent" && (o.OutputFormat == "jpeg" || o.OutputFormat == "gif") {
+		return &ImageOptionError{Param: "output_format", Message: "background=transparent requires output_format=png or webp"}
 	}
 	return nil
 }
@@ -89,10 +92,21 @@ func (o ImageOutputOptions) promptSuffix() string {
 	case "opaque":
 		suffix += "\nOutput requirement: use a fully opaque background, with no transparent or semi-transparent pixels. Follow the user's requested content and editing operation."
 	}
-	// Request a PNG source from Web; final format is encoded locally. This does
-	// not rely on unverified Web support for Images API output_format fields.
-	if o.OutputFormat != "" || o.Background == "transparent" {
+	// Static formats use a PNG source and local encoding. Animation must come
+	// from the Web image tool itself; it cannot be made by converting a still.
+	if o.OutputFormat == "gif" {
+		suffix += "\nCreate an animated GIF file, not a still image or a sprite sheet. Preserve the requested motion and loop."
+		if o.FrameCount != nil {
+			suffix += fmt.Sprintf("\nframe_count: %d", *o.FrameCount)
+		}
+		if o.FrameDurationMS != nil {
+			suffix += fmt.Sprintf("\nframe_duration_ms: %d", *o.FrameDurationMS)
+		}
+	} else if o.OutputFormat != "" || o.Background == "transparent" {
 		suffix += "\nOutput file format: PNG. Preserve the alpha channel when the background is transparent."
+	}
+	if o.Complexity != "" {
+		suffix += "\nImage planning complexity: " + o.Complexity + "."
 	}
 	return suffix
 }
@@ -123,6 +137,15 @@ func invalidImageOutput(message string) error {
 func (o ImageOutputOptions) applyDecoded(download downloadedImage) ([]byte, string, error) {
 	raw, mime, decoded := download.raw, download.mime, download.decoded
 	target := o.EffectiveFormat()
+	if target == "gif" {
+		if mime != "image/gif" {
+			return nil, "", invalidImageOutput("OpenAI returned a still image instead of the requested GIF")
+		}
+		if err := validateGIFOutput(raw); err != nil {
+			return nil, "", err
+		}
+		return raw, mime, nil
+	}
 	if o.Background != "transparent" && o.Background != "opaque" && mime == "image/"+target {
 		return raw, mime, nil
 	}

@@ -30,6 +30,11 @@ var imageKeepAlive = 15 * time.Second
 const maxIdempotencyKeyLength = 160
 
 type imageGenerationTool struct {
+	Complexity        string `json:"complexity,omitempty"`
+	FrameCount        *int   `json:"frame_count,omitempty"`
+	FrameDurationMS   *int   `json:"frame_duration_ms,omitempty"`
+	OutputCompression *int   `json:"output_compression,omitempty"`
+
 	Type          string `json:"type"`
 	Model         string `json:"model"`
 	Size          string `json:"size"`
@@ -64,7 +69,7 @@ type imageResponseInput struct {
 // decodeImageResponse reads an image request. Strict, it refuses options the
 // image job does not use, which tells a plain image request from a
 // conversation that merely offers the tool; otherwise those options (other
-// Responses fields, output_compression, moderation…) are ignored.
+// Responses fields, moderation…) are ignored.
 func decodeImageResponse(data []byte, strict bool) (imageResponseRequest, imageResponseInput, error) {
 	var r imageResponseRequest
 	var out imageResponseInput
@@ -81,6 +86,12 @@ func decodeImageResponse(data []byte, strict bool) (imageResponseRequest, imageR
 		return r, out, errors.New("exactly one image_generation tool with supported options is required")
 	}
 	t := out.Tool
+	if normalizeImageOption(t.OutputFormat) == "gif" && (r.Stream || t.PartialImages != nil && *t.PartialImages != 0 || t.Mask != nil || t.OutputCompression != nil) {
+		return r, out, errors.New("GIF output does not support streaming, partial_images, masks, or output_compression")
+	}
+	if strict && t.OutputCompression != nil {
+		return r, out, errors.New("output_compression is not supported for image jobs")
+	}
 	if strict && t.PartialImages != nil && (*t.PartialImages < 0 || *t.PartialImages > 3) {
 		return r, out, errors.New("partial_images must be 0-3")
 	}
@@ -220,7 +231,7 @@ func (h *Handler) handleImageResponse(c *gin.Context, body []byte, key clientkey
 	job, err := h.gateway.CreateImageJob(ctx, gateway.ImageJobInput{
 		RequestID: requestID, ClientKey: key, PublicModel: model, Prompt: in.Prompt, ImageURLs: in.Images, MaskURL: mask,
 		Size: normalizeImageOption(tool.Size), Quality: normalizeImageOption(tool.Quality),
-		OutputFormat: normalizeImageOption(tool.OutputFormat), Background: normalizeImageOption(tool.Background),
+		Complexity: normalizeImageOption(tool.Complexity), FrameCount: tool.FrameCount, FrameDurationMS: tool.FrameDurationMS, OutputFormat: normalizeImageOption(tool.OutputFormat), Background: normalizeImageOption(tool.Background),
 		ResponseModel: request.Model, ResponseBackground: request.Background, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
@@ -387,12 +398,21 @@ func imageResponseObject(job mediadomain.Job, result *gateway.ImageJobImage, usa
 	if status == "completed" && usage != nil {
 		usageValue = usage
 	}
+	tool := gin.H{"type": "image_generation", "model": job.Model, "size": job.Size, "quality": job.Quality, "background": params.Background, "output_format": params.OutputFormat}
+	if params.Complexity != "" {
+		tool["complexity"] = params.Complexity
+	}
+	for name, value := range map[string]*int{"frame_count": params.FrameCount, "frame_duration_ms": params.FrameDurationMS} {
+		if value != nil {
+			tool[name] = *value
+		}
+	}
 	return gin.H{
 		"id": job.ID, "object": "response", "created_at": job.CreatedAt.Unix(), "status": status,
 		"background": params.ResponseBackground, "error": problem, "incomplete_details": nil, "instructions": nil,
 		"metadata": gin.H{}, "model": model, "output": output, "parallel_tool_calls": false,
 		"tool_choice": gin.H{"type": "image_generation"}, "store": true, "usage": usageValue,
-		"tools": []any{gin.H{"type": "image_generation", "model": job.Model, "size": job.Size, "quality": job.Quality, "background": params.Background, "output_format": params.OutputFormat}},
+		"tools": []any{tool},
 	}
 }
 

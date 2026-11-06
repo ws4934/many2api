@@ -18,7 +18,7 @@ import (
 // Codex image routes draw through the Codex backend's Images API
 // (chatgpt.com/backend-api/codex/images), which paid plans may use with any
 // ChatGPT login. Each route names the Images API model after its prefix.
-var codexImageModels = []string{"codex-gpt-image-2", "codex-gpt-image-2.5", "codex-gpt-image-2.5-flare", "codex-gpt-image-2.5-sunburst"}
+var codexImageModels = []string{"codex-gpt-image-2", "codex-gpt-image-2.5", "codex-gpt-image-2.5-flare", "codex-gpt-image-2.5-sunburst", "codex-gpt-image-2.6-flare", "codex-gpt-image-2.6-sunburst"}
 
 const codexImagePrefix = "codex-"
 
@@ -126,9 +126,14 @@ func (a *Adapter) codexDo(ctx context.Context, credential account.Credential, c 
 // keeps the Images API alpha convention.
 func (a *Adapter) generateCodexImage(ctx context.Context, credential account.Credential, c credentials, job imageJob, engine string, onAccepted func()) (imageOutput, bool, error) {
 	payload := map[string]any{"model": engine, "prompt": job.prompt, "n": 1}
-	for key, value := range map[string]string{"size": job.size, "quality": job.quality, "background": job.background, "output_format": job.outputFormat} {
+	for key, value := range map[string]string{"size": job.size, "quality": job.quality, "background": job.background, "output_format": job.outputFormat, "complexity": job.complexity} {
 		if value != "" {
 			payload[key] = value
+		}
+	}
+	for key, value := range map[string]*int{"frame_count": job.frameCount, "frame_duration_ms": job.frameDurationMS, "output_compression": job.outputCompression} {
+		if value != nil {
+			payload[key] = *value
 		}
 	}
 	path := "/codex/images/generations"

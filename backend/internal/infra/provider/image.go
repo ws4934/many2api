@@ -9,6 +9,11 @@ import (
 )
 
 type ImageGenerationRequest struct {
+	Complexity        string
+	FrameCount        *int
+	FrameDurationMS   *int
+	OutputCompression *int
+
 	Credential     account.Credential
 	Model          string
 	Prompt         string
@@ -32,6 +37,11 @@ type ImageInput struct {
 }
 
 type ImageEditRequest struct {
+	Complexity        string
+	FrameCount        *int
+	FrameDurationMS   *int
+	OutputCompression *int
+
 	Credential     account.Credential
 	Model          string
 	Prompt         string
@@ -53,13 +63,13 @@ type ImageEditRequest struct {
 func (r ImageGenerationRequest) Options() ImageRequestOptions {
 	return ImageRequestOptions{UpstreamModel: r.Model, Count: r.Count, Size: r.Size, AspectRatio: r.AspectRatio,
 		Resolution: r.Resolution, Quality: r.Quality, ResponseFormat: r.ResponseFormat,
-		OutputFormat: r.OutputFormat, Background: r.Background, Streaming: r.Streaming, PartialImages: r.PartialImages}
+		Complexity: r.Complexity, FrameCount: r.FrameCount, FrameDurationMS: r.FrameDurationMS, OutputCompression: r.OutputCompression, OutputFormat: r.OutputFormat, Background: r.Background, Streaming: r.Streaming, PartialImages: r.PartialImages}
 }
 
 func (r ImageEditRequest) Options() ImageRequestOptions {
 	return ImageRequestOptions{UpstreamModel: r.Model, Edit: true, InputImages: len(r.ImageURLs), HasMask: r.MaskURL != "",
 		Count: r.Count, Size: r.Size, AspectRatio: r.AspectRatio, Resolution: r.Resolution, Quality: r.Quality,
-		ResponseFormat: r.ResponseFormat, OutputFormat: r.OutputFormat, Background: r.Background, Streaming: r.Streaming, PartialImages: r.PartialImages}
+		ResponseFormat: r.ResponseFormat, Complexity: r.Complexity, FrameCount: r.FrameCount, FrameDurationMS: r.FrameDurationMS, OutputCompression: r.OutputCompression, OutputFormat: r.OutputFormat, Background: r.Background, Streaming: r.Streaming, PartialImages: r.PartialImages}
 }
 
 // ImageGenerationAdapter defines an optional Provider image-generation capability.
@@ -77,6 +87,10 @@ type ImageEditAdapter interface {
 // ImageJobRequest is one image of a durable image job. A request with
 // ImageURLs is an edit; images and the mask are data URIs or https URLs.
 type ImageJobRequest struct {
+	Complexity      string
+	FrameCount      *int
+	FrameDurationMS *int
+
 	Credential   account.Credential
 	Model        string
 	Prompt       string
@@ -114,6 +128,11 @@ type AsyncImageAdapter interface {
 // ImageRequestOptions are the client image parameters checked against a
 // provider before routing; empty strings mean "not specified".
 type ImageRequestOptions struct {
+	Complexity        string
+	FrameCount        *int
+	FrameDurationMS   *int
+	OutputCompression *int
+
 	UpstreamModel  string
 	Edit           bool
 	Count          int

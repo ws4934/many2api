@@ -202,3 +202,21 @@ func TestImageGenerationLeavesProviderParametersToRouting(t *testing.T) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestImageEditGIFOptionsJSONAndMultipart(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(`{"model":"gpt-image-2.6","prompt":"animate","image":"`+onePixelDataURI+`","output_format":"gif","frame_count":3,"frame_duration_ms":230,"complexity":"medium"}`))
+	request.Header.Set("Content-Type", "application/json")
+	parsed, _, _ := readImageEditForTest(t, request)
+	if parsed.FrameCount == nil || *parsed.FrameCount != 3 || parsed.FrameDurationMS == nil || *parsed.FrameDurationMS != 230 || parsed.Complexity != "medium" {
+		t.Fatalf("JSON = %+v", parsed)
+	}
+	form := &multipart.Form{Value: map[string][]string{"model": {"gpt-image-2.6"}, "prompt": {"animate"}, "image_url": {onePixelDataURI}, "output_format": {"gif"}, "frame_count": {"3"}, "frame_duration_ms": {"230"}, "complexity": {"medium"}}}
+	parsed, _, _, err := readImageEditForm(form)
+	if err != nil || parsed.FrameCount == nil || *parsed.FrameCount != 3 || parsed.FrameDurationMS == nil || *parsed.FrameDurationMS != 230 || parsed.Complexity != "medium" {
+		t.Fatalf("multipart = %+v %v", parsed, err)
+	}
+	form.Value["frame_count"] = []string{"3.5"}
+	if _, _, _, err = readImageEditForm(form); err == nil {
+		t.Fatal("fractional frame_count accepted")
+	}
+}

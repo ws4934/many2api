@@ -35,7 +35,8 @@ import (
 // imageToolAdapter keeps the native ChatGPT declaration and fakes the upstream image steps.
 type imageToolAdapter struct {
 	*chatgpt.Adapter
-	png []byte
+	png      []byte
+	observed chan provider.ImageJobRequest
 }
 
 func (a *imageToolAdapter) ListModels(context.Context, account.Credential) ([]string, error) {
@@ -49,6 +50,9 @@ func (a *imageToolAdapter) ForwardResponse(context.Context, provider.ResponseRes
 }
 
 func (a *imageToolAdapter) SubmitImage(_ context.Context, request provider.ImageJobRequest, save func(provider.ImageCheckpoint) error) (provider.ImageCheckpoint, error) {
+	if a.observed != nil {
+		a.observed <- request
+	}
 	if request.Prompt == "fail" {
 		return provider.ImageCheckpoint{}, &providerRequestError{"upstream rejected the prompt"}
 	}
@@ -72,6 +76,7 @@ func (e *providerRequestError) HTTPStatusCode() int        { return http.StatusB
 func (e *providerRequestError) RequestScopedFailure() bool { return true }
 
 type imageToolFixture struct {
+	adapter *imageToolAdapter
 	gateway *gateway.Service
 	router  *gin.Engine
 	key     clientkeydomain.Key
@@ -142,7 +147,7 @@ func newImageToolFixture(t *testing.T) *imageToolFixture {
 		c.Set(middleware.RequestIDKey, "request-images")
 	})
 	NewHandler(service, nil, 32<<20).Register(v1)
-	return &imageToolFixture{gateway: service, router: router, key: key}
+	return &imageToolFixture{gateway: service, router: router, key: key, adapter: adapter}
 }
 
 func (f *imageToolFixture) startWorkers(t *testing.T) {

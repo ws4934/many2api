@@ -23,6 +23,11 @@ import (
 
 // ImageGenerationInput 表示图片生成用例已经完成协议校验后的输入。
 type ImageGenerationInput struct {
+	Complexity        string
+	FrameCount        *int
+	FrameDurationMS   *int
+	OutputCompression *int
+
 	RequestID      string
 	ClientKey      clientkey.Key
 	PublicModel    string
@@ -44,6 +49,11 @@ type ImageGenerationInput struct {
 
 // ImageEditInput 表示图片编辑用例已经完成协议校验后的输入；ImageURLs 与 MaskURL 为 data URI 或 https URL。
 type ImageEditInput struct {
+	Complexity        string
+	FrameCount        *int
+	FrameDurationMS   *int
+	OutputCompression *int
+
 	RequestID      string
 	ClientKey      clientkey.Key
 	PublicModel    string
@@ -93,7 +103,7 @@ func (s *Service) GenerateImage(ctx context.Context, input ImageGenerationInput)
 func (s *Service) generateImage(ctx context.Context, input ImageGenerationInput, extra bool) (*Result, error) {
 	options := provider.ImageRequestOptions{
 		Count: input.Count, Size: input.Size, AspectRatio: input.AspectRatio, Resolution: input.Resolution, Quality: input.Quality,
-		ResponseFormat: input.ResponseFormat, OutputFormat: input.OutputFormat, Background: input.Background,
+		ResponseFormat: input.ResponseFormat, Complexity: input.Complexity, FrameCount: input.FrameCount, FrameDurationMS: input.FrameDurationMS, OutputCompression: input.OutputCompression, OutputFormat: input.OutputFormat, Background: input.Background,
 		Streaming: input.Streaming, PartialImages: input.PartialImages,
 	}
 	return s.executeImage(ctx, input.RequestID, input.ClientKey, input.PublicModel, input.Prompt, audit.OperationImage, modeldomain.CapabilityImage, func(providerValue accountdomain.Provider) bool {
@@ -108,7 +118,7 @@ func (s *Service) generateImage(ctx context.Context, input ImageGenerationInput,
 			Credential: credential, Model: upstream, Prompt: input.Prompt, Count: effective.Count,
 			Size: effective.Size, AspectRatio: effective.AspectRatio, Resolution: effective.Resolution, Quality: effective.Quality,
 			ResponseFormat: effective.ResponseFormat, Streaming: effective.Streaming, PartialImages: effective.PartialImages,
-			OutputFormat: effective.OutputFormat, Background: effective.Background,
+			Complexity: effective.Complexity, FrameCount: effective.FrameCount, FrameDurationMS: effective.FrameDurationMS, OutputCompression: effective.OutputCompression, OutputFormat: effective.OutputFormat, Background: effective.Background,
 		})
 	}, options, input.Method, input.Path, input.Headers, extra)
 }
@@ -130,7 +140,7 @@ func (s *Service) editImage(ctx context.Context, input ImageEditInput, extra boo
 	options := provider.ImageRequestOptions{
 		Edit: true, Count: input.Count, InputImages: len(input.ImageURLs), HasMask: input.MaskURL != "",
 		Size: input.Size, AspectRatio: input.AspectRatio, Resolution: input.Resolution, Quality: input.Quality,
-		ResponseFormat: input.ResponseFormat, OutputFormat: input.OutputFormat, Background: input.Background,
+		ResponseFormat: input.ResponseFormat, Complexity: input.Complexity, FrameCount: input.FrameCount, FrameDurationMS: input.FrameDurationMS, OutputCompression: input.OutputCompression, OutputFormat: input.OutputFormat, Background: input.Background,
 		Streaming: input.Streaming, PartialImages: input.PartialImages,
 	}
 	return s.executeImage(ctx, input.RequestID, input.ClientKey, input.PublicModel, input.Prompt, audit.OperationImageEdit, modeldomain.CapabilityImageEdit, func(providerValue accountdomain.Provider) bool {
@@ -146,7 +156,7 @@ func (s *Service) editImage(ctx context.Context, input ImageEditInput, extra boo
 			ImageURLs: input.ImageURLs[:effective.InputImages], Count: effective.Count, Size: effective.Size, AspectRatio: effective.AspectRatio,
 			Resolution: effective.Resolution, Quality: effective.Quality, ResponseFormat: effective.ResponseFormat,
 			Streaming: effective.Streaming, PartialImages: effective.PartialImages,
-			OutputFormat: effective.OutputFormat, Background: effective.Background, MaskURL: input.MaskURL,
+			Complexity: effective.Complexity, FrameCount: effective.FrameCount, FrameDurationMS: effective.FrameDurationMS, OutputCompression: effective.OutputCompression, OutputFormat: effective.OutputFormat, Background: effective.Background, MaskURL: input.MaskURL,
 		})
 	}, options, input.Method, input.Path, input.Headers, extra)
 }

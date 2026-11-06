@@ -12,6 +12,11 @@ import (
 )
 
 type imageGenerationRequest struct {
+	Complexity        string `json:"complexity"`
+	FrameCount        *int   `json:"frame_count"`
+	FrameDurationMS   *int   `json:"frame_duration_ms"`
+	OutputCompression *int   `json:"output_compression"`
+
 	Model          string `json:"model"`
 	Prompt         string `json:"prompt"`
 	Count          *int   `json:"n"`
@@ -29,6 +34,11 @@ type imageGenerationRequest struct {
 // imageEditJSONRequest is also filled from multipart fields; image, images,
 // image_url and mask accept every form imageReferences understands.
 type imageEditJSONRequest struct {
+	Complexity        string `json:"complexity"`
+	FrameCount        *int   `json:"frame_count"`
+	FrameDurationMS   *int   `json:"frame_duration_ms"`
+	OutputCompression *int   `json:"output_compression"`
+
 	Model          string          `json:"model"`
 	Prompt         string          `json:"prompt"`
 	Image          json.RawMessage `json:"image"`
@@ -64,6 +74,10 @@ func (h *Handler) generateImage(c *gin.Context) {
 		writeOpenAIError(c, http.StatusBadRequest, "invalid_request", "图片请求缺少有效 model 或 prompt")
 		return
 	}
+	if normalizeImageOption(request.OutputFormat) == "gif" && request.PartialImages != nil && *request.PartialImages != 0 {
+		writeOpenAIError(c, http.StatusBadRequest, "invalid_request", "GIF output does not support partial_images")
+		return
+	}
 	count, partialImages := imageCounts(request.Count, request.PartialImages, request.Stream)
 	clientKey, requestID, ok := requestIdentity(c)
 	if !ok {
@@ -73,7 +87,7 @@ func (h *Handler) generateImage(c *gin.Context) {
 		RequestID: requestID, ClientKey: clientKey, PublicModel: request.Model, Prompt: request.Prompt,
 		Count: count, Size: request.Size, AspectRatio: request.AspectRatio,
 		Resolution: request.Resolution, Quality: normalizeImageOption(request.Quality), ResponseFormat: request.ResponseFormat,
-		OutputFormat: normalizeImageOption(request.OutputFormat), Background: normalizeImageOption(request.Background),
+		Complexity: normalizeImageOption(request.Complexity), FrameCount: request.FrameCount, FrameDurationMS: request.FrameDurationMS, OutputCompression: request.OutputCompression, OutputFormat: normalizeImageOption(request.OutputFormat), Background: normalizeImageOption(request.Background),
 		Streaming: request.Stream, PartialImages: partialImages,
 		Method: c.Request.Method, Path: c.Request.URL.Path, Headers: c.Request.Header.Clone(),
 	})
@@ -103,6 +117,10 @@ func (h *Handler) editImage(c *gin.Context) {
 		writeOpenAIError(c, http.StatusBadRequest, "invalid_request", "图片编辑缺少有效 model 或 prompt")
 		return
 	}
+	if normalizeImageOption(request.OutputFormat) == "gif" && request.PartialImages != nil && *request.PartialImages != 0 {
+		writeOpenAIError(c, http.StatusBadRequest, "invalid_request", "GIF output does not support partial_images")
+		return
+	}
 	count, partialImages := imageCounts(request.Count, request.PartialImages, request.Stream)
 	maskURL := ""
 	if len(maskURLs) == 1 {
@@ -117,7 +135,7 @@ func (h *Handler) editImage(c *gin.Context) {
 		ImageURLs: imageURLs, MaskURL: maskURL, Count: count,
 		Size: normalizeImageOption(request.Size), AspectRatio: normalizeImageOption(request.AspectRatio),
 		Resolution: normalizeImageOption(request.Resolution), Quality: normalizeImageOption(request.Quality), ResponseFormat: request.ResponseFormat,
-		OutputFormat: normalizeImageOption(request.OutputFormat), Background: normalizeImageOption(request.Background),
+		Complexity: normalizeImageOption(request.Complexity), FrameCount: request.FrameCount, FrameDurationMS: request.FrameDurationMS, OutputCompression: request.OutputCompression, OutputFormat: normalizeImageOption(request.OutputFormat), Background: normalizeImageOption(request.Background),
 		Streaming: request.Stream, PartialImages: partialImages,
 		Method: c.Request.Method, Path: c.Request.URL.Path, Headers: c.Request.Header.Clone(),
 	})

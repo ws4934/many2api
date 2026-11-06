@@ -25,8 +25,9 @@ import (
 // and capability overlay, and replaces only the upstream calls.
 type chatgptRouteAdapter struct {
 	*chatgpt.Adapter
-	mu    sync.Mutex
-	calls []string
+	mu           sync.Mutex
+	calls        []string
+	imageRequest func(provider.ImageGenerationRequest)
 }
 
 func (a *chatgptRouteAdapter) record(call string) {
@@ -46,6 +47,9 @@ func (a *chatgptRouteAdapter) ForwardResponse(_ context.Context, request provide
 }
 
 func (a *chatgptRouteAdapter) GenerateImage(_ context.Context, request provider.ImageGenerationRequest) (*provider.Response, error) {
+	if a.imageRequest != nil {
+		a.imageRequest(request)
+	}
 	a.record("image:" + request.Model)
 	return &provider.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"AA=="}]}`))}, nil
 }
@@ -112,9 +116,22 @@ func TestChatGPTRoutesServeAllScopeKeyAfterModelSync(t *testing.T) {
 	image.Finalize(Usage{}, "", "")
 	_ = image.Body.Close()
 
+	n, delay := 3, 230
+	adapter.imageRequest = func(request provider.ImageGenerationRequest) {
+		if request.Model != "gpt-image-2.6" || request.OutputFormat != "gif" || request.FrameCount == nil || *request.FrameCount != 3 || request.FrameDurationMS == nil || *request.FrameDurationMS != 230 || request.Complexity != "medium" {
+			t.Fatalf("GIF forwarding = %+v", request)
+		}
+	}
+	animation, err := service.GenerateImage(ctx, ImageGenerationInput{RequestID: "req-gif", ClientKey: key, PublicModel: "gpt-image-2.6", Prompt: "loop", Count: 1, OutputFormat: "gif", FrameCount: &n, FrameDurationMS: &delay, Complexity: "medium"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.ReadAll(animation.Body)
+	animation.Finalize(Usage{}, "", "")
+	_ = animation.Body.Close()
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
-	if strings.Join(adapter.calls, ",") != "chat:gpt-5,image:gpt-image-2" {
+	if strings.Join(adapter.calls, ",") != "chat:gpt-5,image:gpt-image-2,image:gpt-image-2.6" {
 		t.Fatalf("upstream calls = %v", adapter.calls)
 	}
 }

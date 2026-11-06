@@ -130,19 +130,47 @@ Build 从上游 `/v1/models` 同步模型。以下条目是代码的已知模型
 | `gpt-image-2.5` | Web `gpt-6`，其次 `auto` | 8 | 同上 | 同上 | 账号有可用的图片工具 |
 | `gpt-image-2.5-flare` | 与 Web `gpt-image-2.5` 同一通路 | 8 | 同上 | 同上 | 兼容别名，不能强制 Flare 引擎 |
 | `gpt-image-2.5-sunburst` | 与 Web `gpt-image-2.5` 同一通路 | 8 | 同上 | 同上 | 兼容别名，不能强制 Sunburst 引擎 |
+| `gpt-image-2.6` | Web `gpt-6`，其次 `auto` | 8 | 1–10；单次上游 1 张 | 静态图支持蒙版；可恢复任务 | 账号有可用的图片工具；GIF 见下文 |
+| `gpt-image-2.6-flare` | 与 Web `gpt-image-2.6` 同一通路 | 8 | 同上 | 同上 | 兼容别名，不能强制 Flare 引擎 |
+| `gpt-image-2.6-sunburst` | 与 Web `gpt-image-2.6` 同一通路 | 8 | 同上 | 同上 | 兼容别名，不能强制 Sunburst 引擎 |
 | `codex-gpt-image-2` | Codex Images API：`gpt-image-2` | 8 | 1–10；网关拆分单图 | 支持蒙版；无可恢复上游任务 | 付费套餐 |
 | `codex-gpt-image-2.5` | Codex Images API：`gpt-image-2.5` | 8 | 同上 | 同上 | 付费套餐 |
 | `codex-gpt-image-2.5-flare` | Codex Images API：`gpt-image-2.5-flare` | 8 | 同上 | 同上 | 付费套餐 |
 | `codex-gpt-image-2.5-sunburst` | Codex Images API：`gpt-image-2.5-sunburst` | 8 | 同上 | 同上 | 付费套餐 |
+| `codex-gpt-image-2.6-flare` | Codex Images API：`gpt-image-2.6-flare` | 8 | 1–10；网关拆分单图 | 静态图支持蒙版；无可恢复上游任务 | 付费套餐；GIF 还需上游开放权限 |
+| `codex-gpt-image-2.6-sunburst` | Codex Images API：`gpt-image-2.6-sunburst` | 8 | 同上 | 同上 | 同上 |
 
 共同规则：
 
 - 超过 8 张保留前 8 张；**有蒙版时只能有 1 张输入图**。蒙版不是第 2 张参考图。
-- 支持网关 SSE，但当前实现不提供真正的中间预览图，`partial_images` 不代表能获得逐步画面。
-- `size` 的参数适配范围为每边 256–4096；也可由 `aspect_ratio` 和分辨率档位转换。Web 通路把形状／尺寸写入提示词，不能保证像素严格一致；Codex 通路发送 Images API 参数。
-- 质量支持 auto／low／medium／high；输出格式 PNG／JPEG／WebP；支持透明背景请求，但 JPEG 不能保存透明通道。透明结果还会经过本地检查／处理。
-- Codex 付费套餐名单：Plus、Pro、Team、Business、Enterprise、Edu。四个 Codex 路由都不接可恢复的异步图片任务。
+- 静态图支持网关 SSE，但当前实现不提供真正的中间预览图，`partial_images` 不代表能获得逐步画面。
+- 静态图 `size` 的参数适配范围为每边 256–4096；也可由 `aspect_ratio` 和分辨率档位转换。Web 通路把形状／尺寸写入提示词，不能保证像素严格一致；Codex 通路发送 Images API 参数。
+- 静态图质量支持 auto／low／medium／high；输出格式 PNG／JPEG／WebP；支持透明背景请求，但 JPEG 不能保存透明通道。透明结果还会经过本地检查／处理。
+- Codex 付费套餐名单：Plus、Pro、Team、Business、Enterprise、Edu。Codex 路由都不接可恢复的异步图片任务。
 - `provider.chatgpt.imageConversationModel` 配置可覆盖 Web 图片路由选用的对话模型。
+
+**GPT Image 2.6 GIF**
+
+- Images 生成、编辑接口接受 `output_format: "gif"`；Web 还支持 Responses `image_generation` 工具及后台图片任务。Codex 继续使用 Images API，不接可恢复任务。
+- `frame_count` 为 2–16；`frame_duration_ms` 至少 20 ms。省略时 Codex 使用上游默认值（9 帧、200 ms/帧）；Web 只把明确提供的值写入提示词，实际帧数、帧间隔由图片工具决定。
+- `complexity` 接受 low／medium／high：Codex 直接透传，Web 作为规划复杂度提示，不改变 `quality`。
+- GIF 不支持 `stream: true`、非零 `partial_images`、蒙版、`output_compression` 或透明背景请求。尺寸为 auto 或每边为 16 倍数的正整数；最终限制由上游模型执行，Web 尺寸仍属于提示。
+- 原始 GIF 字节直接归档并以 `image/gif` 返回，保留所有帧、延迟、循环与 disposal 信息；不会放大、重新编码成静态图，也不会把返回的 PNG 冒充 GIF。
+
+```json
+{
+  "model": "chatgpt/gpt-image-2.6",
+  "prompt": "一只小猫眨眼，首尾衔接的循环动画",
+  "output_format": "gif",
+  "frame_count": 9,
+  "frame_duration_ms": 200,
+  "response_format": "url"
+}
+```
+
+发送至 `POST /v1/images/generations`。需要明确指定原生 Flare 引擎时，模型改为 `chatgpt/codex-gpt-image-2.6-flare`。部署后同步 ChatGPT 账号模型以刷新可用路由。上述适配已用模拟上游验证，真实账号能否生成 GIF 仍取决于上游开放情况。
+
+官方参数：[图片生成与 GIF 指南](https://developers.openai.com/api/docs/guides/image-generation)、[Images API 参数](https://developers.openai.com/api/reference/resources/images/methods/generate)。
 
 来源：[Web 图片模型映射](backend/internal/infra/provider/chatgpt/image_models.go)、[Codex 图片路由](backend/internal/infra/provider/chatgpt/codex_images.go)、[图片参数与校验](backend/internal/infra/provider/chatgpt/images.go)、[输出处理](backend/internal/infra/provider/chatgpt/image_output.go)。
 

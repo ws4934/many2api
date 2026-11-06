@@ -26,26 +26,30 @@ var imageKeepAlive = 15 * time.Second
 
 // imageJob is one Images API request.
 type imageJob struct {
-	model          string
-	edit           bool
-	prompt         string
-	count          int
-	size           string
-	quality        string
-	responseFormat string
-	outputFormat   string
-	background     string
-	inputs         []string
-	mask           string
-	streaming      bool
-	partialImages  int
-	aspectRatio    string
-	resolution     string
+	complexity        string
+	frameCount        *int
+	frameDurationMS   *int
+	outputCompression *int
+	model             string
+	edit              bool
+	prompt            string
+	count             int
+	size              string
+	quality           string
+	responseFormat    string
+	outputFormat      string
+	background        string
+	inputs            []string
+	mask              string
+	streaming         bool
+	partialImages     int
+	aspectRatio       string
+	resolution        string
 }
 
 func (j imageJob) options() provider.ImageRequestOptions {
 	return provider.ImageRequestOptions{
-		Edit: j.edit, Count: j.count, InputImages: len(j.inputs), HasMask: j.mask != "", Size: j.size, AspectRatio: j.aspectRatio,
+		UpstreamModel: j.model, Complexity: j.complexity, FrameCount: j.frameCount, FrameDurationMS: j.frameDurationMS, OutputCompression: j.outputCompression, Edit: j.edit, Count: j.count, InputImages: len(j.inputs), HasMask: j.mask != "", Size: j.size, AspectRatio: j.aspectRatio,
 		Resolution: j.resolution, Quality: j.quality, ResponseFormat: j.responseFormat, OutputFormat: j.outputFormat,
 		Background: j.background, Streaming: j.streaming, PartialImages: j.partialImages,
 	}
@@ -61,7 +65,7 @@ type imageOutput struct {
 func (a *Adapter) GenerateImage(ctx context.Context, request provider.ImageGenerationRequest) (*provider.Response, error) {
 	return a.images(ctx, request.Credential, imageJob{
 		model: request.Model, prompt: request.Prompt, count: request.Count, size: request.Size, quality: request.Quality, responseFormat: request.ResponseFormat,
-		outputFormat: request.OutputFormat, background: request.Background, streaming: request.Streaming, partialImages: request.PartialImages,
+		complexity: request.Complexity, frameCount: request.FrameCount, frameDurationMS: request.FrameDurationMS, outputCompression: request.OutputCompression, outputFormat: request.OutputFormat, background: request.Background, streaming: request.Streaming, partialImages: request.PartialImages,
 		aspectRatio: request.AspectRatio, resolution: request.Resolution,
 	})
 }
@@ -69,21 +73,24 @@ func (a *Adapter) GenerateImage(ctx context.Context, request provider.ImageGener
 func (a *Adapter) EditImage(ctx context.Context, request provider.ImageEditRequest) (*provider.Response, error) {
 	return a.images(ctx, request.Credential, imageJob{
 		model: request.Model, edit: true, prompt: request.Prompt, count: request.Count, size: request.Size, quality: request.Quality, responseFormat: request.ResponseFormat,
-		outputFormat: request.OutputFormat, background: request.Background, inputs: request.ImageURLs, mask: request.MaskURL,
+		complexity: request.Complexity, frameCount: request.FrameCount, frameDurationMS: request.FrameDurationMS, outputCompression: request.OutputCompression, outputFormat: request.OutputFormat, background: request.Background, inputs: request.ImageURLs, mask: request.MaskURL,
 		streaming: request.Streaming, partialImages: request.PartialImages, aspectRatio: request.AspectRatio, resolution: request.Resolution,
 	})
 }
 
 // ValidateImageRequest applies the ChatGPT Web image limits. Shape, quality
-// and output parameters are adapted, never refused (see adapted);
-// partial_images is accepted and ignored: the Web tool sends no intermediate
-// frames.
+// and static output parameters are adapted (see adapted). GIF requests retain
+// their format and animation constraints; partial_images is otherwise accepted
+// and ignored because the Web tool sends no intermediate previews.
 func (*Adapter) NormalizeImageRequest(o provider.ImageRequestOptions) (provider.ImageRequestOptions, error) {
 	o.InputImages = min(o.InputImages, 8)
 	return o, nil
 }
 
 func (a *Adapter) ValidateImageRequest(o provider.ImageRequestOptions) error {
+	if err := validateImageOutputRequest(o); err != nil {
+		return err
+	}
 	switch {
 	case o.Count < 0 || o.Count > 10:
 		return invalidRequest("n must be between 1 and 10")
@@ -109,7 +116,7 @@ func (a *Adapter) ValidateImageRequest(o provider.ImageRequestOptions) error {
 func (j imageJob) adapted() imageJob {
 	lower := func(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
 	j.size, j.aspectRatio, j.resolution, j.quality = lower(j.size), lower(j.aspectRatio), lower(j.resolution), lower(j.quality)
-	j.outputFormat, j.background = lower(j.outputFormat), lower(j.background)
+	j.outputFormat, j.background, j.complexity = lower(j.outputFormat), lower(j.background), lower(j.complexity)
 	switch j.quality {
 	case "", "auto", "low", "medium", "high":
 	case "hd":
@@ -122,6 +129,9 @@ func (j imageJob) adapted() imageJob {
 			j.resolution = j.quality
 		}
 		j.quality = ""
+	}
+	if _, native := codexImageEngine(j.model); native && j.outputFormat == "gif" {
+		return j
 	}
 	if strings.Contains(j.size, ":") && j.aspectRatio == "" {
 		j.aspectRatio, j.size = j.size, ""
@@ -143,7 +153,7 @@ func (j imageJob) adapted() imageJob {
 	if j.outputFormat == "jpg" {
 		j.outputFormat = "jpeg"
 	}
-	if !slices.Contains([]string{"", "png", "jpeg", "webp"}, j.outputFormat) {
+	if !slices.Contains([]string{"", "png", "jpeg", "webp", "gif"}, j.outputFormat) {
 		j.outputFormat = ""
 	}
 	if !slices.Contains([]string{"", "auto", "transparent", "opaque"}, j.background) || j.background == "transparent" && j.outputFormat == "jpeg" {
@@ -458,7 +468,7 @@ func (a *Adapter) submitDrawing(ctx context.Context, w wireAccount, job imageJob
 	if err != nil {
 		return "", nil, err
 	}
-	prompt := job.prompt + (ImageOutputOptions{OutputFormat: job.outputFormat, Background: job.background, Size: job.size, AspectRatio: job.aspectRatio, Resolution: job.resolution}).promptSuffix()
+	prompt := job.prompt + (ImageOutputOptions{OutputFormat: job.outputFormat, Background: job.background, Size: job.size, AspectRatio: job.aspectRatio, Resolution: job.resolution, Complexity: job.complexity, FrameCount: job.frameCount, FrameDurationMS: job.frameDurationMS}).promptSuffix()
 	conduit, err := a.image.prepare(ctx, w, requirements, prompt, model)
 	if err != nil {
 		return "", nil, err
@@ -493,7 +503,7 @@ var _ provider.AsyncImageAdapter = (*Adapter)(nil)
 func asyncImageJob(request provider.ImageJobRequest) imageJob {
 	return imageJob{
 		model: request.Model, edit: len(request.ImageURLs) > 0, prompt: request.Prompt, count: 1, size: request.Size, quality: request.Quality,
-		outputFormat: request.OutputFormat, background: request.Background, inputs: request.ImageURLs, mask: request.MaskURL,
+		complexity: request.Complexity, frameCount: request.FrameCount, frameDurationMS: request.FrameDurationMS, outputFormat: request.OutputFormat, background: request.Background, inputs: request.ImageURLs, mask: request.MaskURL,
 	}.adapted()
 }
 

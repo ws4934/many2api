@@ -58,6 +58,10 @@ var (
 
 // ImageJobInput is a validated asynchronous image request.
 type ImageJobInput struct {
+	Complexity      string
+	FrameCount      *int
+	FrameDurationMS *int
+
 	RequestID   string
 	ClientKey   clientkey.Key
 	PublicModel string
@@ -234,7 +238,7 @@ func (s *Service) CreateImageJob(ctx context.Context, input ImageJobInput) (medi
 	if len(inputJSON) > media.MaxInputJSONBytes {
 		return media.Job{}, ErrImageInputTooLarge
 	}
-	params := media.JobParams{OutputFormat: input.OutputFormat, Background: input.Background, ResponseModel: input.ResponseModel, ResponseBackground: input.ResponseBackground, PinnedAccountID: creativeAccountID(ctx)}
+	params := media.JobParams{Complexity: input.Complexity, FrameCount: input.FrameCount, FrameDurationMS: input.FrameDurationMS, OutputFormat: input.OutputFormat, Background: input.Background, ResponseModel: input.ResponseModel, ResponseBackground: input.ResponseBackground, PinnedAccountID: creativeAccountID(ctx)}
 	// The inputs enter as a digest: they can be 32 MiB of data URIs.
 	hash := payloadHash(struct {
 		Model, Prompt, Size, Quality string
@@ -259,7 +263,7 @@ func (s *Service) CreateImageJob(ctx context.Context, input ImageJobInput) (medi
 	}
 	options := provider.ImageRequestOptions{
 		Edit: edit, Count: 1, InputImages: len(input.ImageURLs), HasMask: input.MaskURL != "",
-		Size: input.Size, Quality: input.Quality, OutputFormat: input.OutputFormat, Background: input.Background,
+		Size: input.Size, Quality: input.Quality, Complexity: input.Complexity, FrameCount: input.FrameCount, FrameDurationMS: input.FrameDurationMS, OutputFormat: input.OutputFormat, Background: input.Background,
 	}
 	clientParameters := imageJobParameters(input)
 	var rejection error
@@ -428,7 +432,7 @@ func (s *Service) runImageJob(parent context.Context, job media.Job, route model
 	}
 	request := provider.ImageJobRequest{
 		Model: route.UpstreamModel, Prompt: job.Prompt, ImageURLs: inputs.ImageURLs, MaskURL: inputs.MaskURL,
-		Size: job.Size, Quality: job.Quality, OutputFormat: job.Params.OutputFormat, Background: job.Params.Background,
+		Size: job.Size, Quality: job.Quality, Complexity: job.Params.Complexity, FrameCount: job.Params.FrameCount, FrameDurationMS: job.Params.FrameDurationMS, OutputFormat: job.Params.OutputFormat, Background: job.Params.Background,
 	}
 	// A worker that died after delivering the image left only the terminal write.
 	if job.ResultAssetID == "" {
@@ -995,7 +999,7 @@ func (s *Service) RetryMediaJob(ctx context.Context, id, idempotencyKey string) 
 		return s.CreateImageJob(ctx, ImageJobInput{
 			RequestID: job.RequestID, ClientKey: key, PublicModel: job.Model, Prompt: job.Prompt,
 			ImageURLs: inputs.ImageURLs, MaskURL: inputs.MaskURL,
-			Size: job.Size, Quality: job.Quality, OutputFormat: job.Params.OutputFormat, Background: job.Params.Background,
+			Size: job.Size, Quality: job.Quality, Complexity: job.Params.Complexity, FrameCount: job.Params.FrameCount, FrameDurationMS: job.Params.FrameDurationMS, OutputFormat: job.Params.OutputFormat, Background: job.Params.Background,
 			ResponseModel: job.Params.ResponseModel, ResponseBackground: job.Params.ResponseBackground, IdempotencyKey: idempotencyKey,
 		})
 	}

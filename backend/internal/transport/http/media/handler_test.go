@@ -7,6 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"image"
+	"image/color"
+	"image/gif"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -52,6 +55,20 @@ func TestPublicImageSupportsGetHeadAndETag(t *testing.T) {
 	router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, path, nil))
 	if get.Code != http.StatusOK || get.Header().Get("Content-Type") != "image/png" || get.Body.Len() != len(raw) || get.Header().Get("ETag") == "" {
 		t.Fatalf("GET status=%d headers=%#v size=%d", get.Code, get.Header(), get.Body.Len())
+	}
+	var animation bytes.Buffer
+	frame := image.NewPaletted(image.Rect(0, 0, 16, 16), color.Palette{color.Black, color.White})
+	if err := gif.EncodeAll(&animation, &gif.GIF{Image: []*image.Paletted{frame, frame}, Delay: []int{20, 30}, LoopCount: 2}); err != nil {
+		t.Fatal(err)
+	}
+	gifAsset, err := service.SaveImage(ctx, animation.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gifResult := httptest.NewRecorder()
+	router.ServeHTTP(gifResult, httptest.NewRequest(http.MethodGet, "/v1/media/images/"+gifAsset.ID, nil))
+	if gifResult.Code != 200 || gifResult.Header().Get("Content-Type") != "image/gif" || !bytes.Equal(gifResult.Body.Bytes(), animation.Bytes()) {
+		t.Fatalf("GIF download changed: %d %v", gifResult.Code, gifResult.Header())
 	}
 	head := httptest.NewRecorder()
 	router.ServeHTTP(head, httptest.NewRequest(http.MethodHead, path, nil))

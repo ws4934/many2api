@@ -10,7 +10,7 @@ import (
 
 // imageModels lists the image routes and, in order of preference, the ChatGPT
 // Web conversation models that may draw them. ChatGPT Web exposes no image
-// engines: images come from the conversation's image tool, so the 2.5 names
+// engines: images come from the conversation's image tool, so the 2.5/2.6 names
 // are compatibility aliases and cannot force Flare or Sunburst.
 var imageModels = []struct {
 	id           string
@@ -20,6 +20,9 @@ var imageModels = []struct {
 	{"gpt-image-2.5", []string{"gpt-6", "auto"}},
 	{"gpt-image-2.5-flare", []string{"gpt-6", "auto"}},
 	{"gpt-image-2.5-sunburst", []string{"gpt-6", "auto"}},
+	{"gpt-image-2.6", []string{"gpt-6", "auto"}},
+	{"gpt-image-2.6-flare", []string{"gpt-6", "auto"}},
+	{"gpt-image-2.6-sunburst", []string{"gpt-6", "auto"}},
 }
 
 // imageCatalogTTL bounds how long an account's image-capable models are reused.

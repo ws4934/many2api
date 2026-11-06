@@ -92,7 +92,7 @@ func readImageEditForm(form *multipart.Form) (imageEditJSONRequest, []string, []
 	request := imageEditJSONRequest{
 		Model: value("model"), Prompt: value("prompt"), Size: value("size"), AspectRatio: value("aspect_ratio"),
 		Resolution: value("resolution"), Quality: value("quality"), ResponseFormat: value("response_format"),
-		OutputFormat: value("output_format"), Background: value("background"),
+		Complexity: value("complexity"), OutputFormat: value("output_format"), Background: value("background"),
 	}
 	var err error
 	if request.Count, err = formInt(value("n")); err != nil {
@@ -100,6 +100,11 @@ func readImageEditForm(form *multipart.Form) (imageEditJSONRequest, []string, []
 	}
 	if request.PartialImages, err = formInt(value("partial_images")); err != nil {
 		return request, nil, nil, errImageFormValue
+	}
+	for name, target := range map[string]**int{"frame_count": &request.FrameCount, "frame_duration_ms": &request.FrameDurationMS, "output_compression": &request.OutputCompression} {
+		if *target, err = formInt(value(name)); err != nil {
+			return request, nil, nil, errImageFormValue
+		}
 	}
 	if raw := value("stream"); raw != "" {
 		if request.Stream, err = strconv.ParseBool(raw); err != nil {

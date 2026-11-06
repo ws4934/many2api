@@ -610,7 +610,7 @@ func TestAccountIdentityModelsAndQuotaWindows(t *testing.T) {
 	if err != nil || strings.Join(models, ",") != "gpt-5,gpt-5-thinking" {
 		t.Fatalf("models = %v, %v", models, err)
 	}
-	if got := a.NormalizeAccountModelCapabilities(models, nil, credential); strings.Join(got[len(models):], ",") != "chatgpt-tts,chatgpt-transcribe,gpt-image-2,gpt-image-2.5,gpt-image-2.5-flare,gpt-image-2.5-sunburst" {
+	if got := a.NormalizeAccountModelCapabilities(models, nil, credential); strings.Join(got[len(models):], ",") != "chatgpt-tts,chatgpt-transcribe,gpt-image-2,gpt-image-2.5,gpt-image-2.5-flare,gpt-image-2.5-sunburst,gpt-image-2.6,gpt-image-2.6-flare,gpt-image-2.6-sunburst" {
 		t.Fatalf("image routes not added: %v", got)
 	}
 	if got := a.NormalizeAccountModelCapabilities([]string{"gpt-4o"}, nil, credential); strings.Join(got, ",") != "gpt-4o,chatgpt-tts,chatgpt-transcribe" {
@@ -801,7 +801,7 @@ func TestValidateImageRequest(t *testing.T) {
 		{Edit: true, InputImages: 1, HasMask: true, Quality: "auto", Size: "auto"}, {Edit: true, InputImages: 8, PartialImages: 3},
 		// Other APIs' shape, quality and output values are adapted, not refused.
 		{Size: "1824x1024", Resolution: "1k"}, {AspectRatio: "16:9"}, {Size: "1024"}, {Size: "100x100"}, {Quality: "hd"},
-		{OutputFormat: "gif"}, {Background: "transparent", OutputFormat: "jpeg"},
+		{OutputFormat: "tiff"}, {Background: "transparent", OutputFormat: "jpeg"},
 	}
 	for _, o := range valid {
 		if err := a.ValidateImageRequest(o); err != nil {
@@ -835,7 +835,7 @@ func TestImageParametersAreAdapted(t *testing.T) {
 		{imageJob{quality: "standard"}, imageJob{quality: "medium"}},
 		{imageJob{quality: "2k"}, imageJob{resolution: "2k"}},
 		{imageJob{outputFormat: "jpg", background: "transparent"}, imageJob{outputFormat: "jpeg"}},
-		{imageJob{outputFormat: "gif", background: "checkered"}, imageJob{}},
+		{imageJob{outputFormat: "tiff", background: "checkered"}, imageJob{}},
 	} {
 		if got := test.in.adapted(); !reflect.DeepEqual(got, test.want) {
 			t.Errorf("%+v adapted = %+v, want %+v", test.in, got, test.want)
@@ -854,7 +854,7 @@ func TestImageRoutesFollowTheImageToolOfEachAccount(t *testing.T) {
 	// A free catalog: every model has the image tool, but there is no gpt-5-3.
 	a.rememberImageCatalog(1, map[string]bool{"auto": true, "gpt-6": true, "gpt-5-3-mini": true})
 	got := a.NormalizeAccountModelCapabilities([]string{"auto", "gpt-6", "gpt-5-3-mini"}, nil, account.Credential{ID: 1})
-	if strings.Join(got, ",") != "auto,gpt-6,gpt-5-3-mini,chatgpt-tts,chatgpt-transcribe,gpt-image-2.5,gpt-image-2.5-flare,gpt-image-2.5-sunburst" {
+	if strings.Join(got, ",") != "auto,gpt-6,gpt-5-3-mini,chatgpt-tts,chatgpt-transcribe,gpt-image-2.5,gpt-image-2.5-flare,gpt-image-2.5-sunburst,gpt-image-2.6,gpt-image-2.6-flare,gpt-image-2.6-sunburst" {
 		t.Fatalf("free catalog image routes = %v", got)
 	}
 	// gpt-5-3 without the image tool does not open gpt-image-2.
@@ -876,7 +876,7 @@ func TestImageRoutesFollowTheImageToolOfEachAccount(t *testing.T) {
 	if got := a.imageCandidates("gpt-image-2.5"); len(got) != 1 || got[0] != "gpt-5-6" || a.QuotaMode("gpt-image-2.5-flare") != quotaModeImage {
 		t.Fatalf("configured override = %v", got)
 	}
-	if len(Routes()) != 18 {
+	if len(Routes()) != 28 {
 		t.Fatalf("routes = %d", len(Routes()))
 	}
 }

@@ -7,16 +7,17 @@ func imageParameters(model, prompt string, o provider.ImageRequestOptions) map[s
 		"model": model, "prompt": prompt, "n": o.Count, "size": o.Size, "aspect_ratio": o.AspectRatio,
 		"resolution": o.Resolution, "quality": o.Quality, "response_format": o.ResponseFormat,
 		"output_format": o.OutputFormat, "background": o.Background, "stream": o.Streaming, "partial_images": o.PartialImages,
+		"complexity": o.Complexity, "frame_count": o.FrameCount, "frame_duration_ms": o.FrameDurationMS, "output_compression": o.OutputCompression,
 		"input_images": o.InputImages, "has_mask": o.HasMask,
 	}
 }
 
 func generatedImageParameters(input ImageGenerationInput) map[string]any {
-	return imageParameters(input.PublicModel, input.Prompt, provider.ImageRequestOptions{Count: input.Count, Size: input.Size, AspectRatio: input.AspectRatio, Resolution: input.Resolution, Quality: input.Quality, ResponseFormat: input.ResponseFormat, OutputFormat: input.OutputFormat, Background: input.Background, Streaming: input.Streaming, PartialImages: input.PartialImages})
+	return imageParameters(input.PublicModel, input.Prompt, provider.ImageRequestOptions{Count: input.Count, Size: input.Size, AspectRatio: input.AspectRatio, Resolution: input.Resolution, Quality: input.Quality, ResponseFormat: input.ResponseFormat, Complexity: input.Complexity, FrameCount: input.FrameCount, FrameDurationMS: input.FrameDurationMS, OutputCompression: input.OutputCompression, OutputFormat: input.OutputFormat, Background: input.Background, Streaming: input.Streaming, PartialImages: input.PartialImages})
 }
 
 func editedImageParameters(input ImageEditInput) map[string]any {
-	values := imageParameters(input.PublicModel, input.Prompt, provider.ImageRequestOptions{Edit: true, Count: input.Count, InputImages: len(input.ImageURLs), HasMask: input.MaskURL != "", Size: input.Size, AspectRatio: input.AspectRatio, Resolution: input.Resolution, Quality: input.Quality, ResponseFormat: input.ResponseFormat, OutputFormat: input.OutputFormat, Background: input.Background, Streaming: input.Streaming, PartialImages: input.PartialImages})
+	values := imageParameters(input.PublicModel, input.Prompt, provider.ImageRequestOptions{Edit: true, Count: input.Count, InputImages: len(input.ImageURLs), HasMask: input.MaskURL != "", Size: input.Size, AspectRatio: input.AspectRatio, Resolution: input.Resolution, Quality: input.Quality, ResponseFormat: input.ResponseFormat, Complexity: input.Complexity, FrameCount: input.FrameCount, FrameDurationMS: input.FrameDurationMS, OutputCompression: input.OutputCompression, OutputFormat: input.OutputFormat, Background: input.Background, Streaming: input.Streaming, PartialImages: input.PartialImages})
 	values["images"], values["mask"] = input.ImageURLs, input.MaskURL
 	return values
 }
@@ -33,5 +34,5 @@ func videoParameters(input VideoInput) map[string]any {
 }
 
 func imageJobParameters(input ImageJobInput) map[string]any {
-	return map[string]any{"model": input.PublicModel, "prompt": input.Prompt, "n": 1, "size": input.Size, "quality": input.Quality, "output_format": input.OutputFormat, "background": input.Background, "images": input.ImageURLs, "mask": input.MaskURL}
+	return map[string]any{"model": input.PublicModel, "prompt": input.Prompt, "n": 1, "size": input.Size, "quality": input.Quality, "complexity": input.Complexity, "frame_count": input.FrameCount, "frame_duration_ms": input.FrameDurationMS, "output_format": input.OutputFormat, "background": input.Background, "images": input.ImageURLs, "mask": input.MaskURL}
 }

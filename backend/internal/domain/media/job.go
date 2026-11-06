@@ -73,6 +73,10 @@ const (
 
 // JobParams are immutable execution and image-output options.
 type JobParams struct {
+	Complexity      string `json:"complexity,omitempty"`
+	FrameCount      *int   `json:"frame_count,omitempty"`
+	FrameDurationMS *int   `json:"frame_duration_ms,omitempty"`
+
 	// PinnedAccountID is set only by administrator creative-console requests.
 	// Persist it so a queued/recovered job never switches to another account.
 	PinnedAccountID uint64 `json:"pinned_account_id,omitempty"`
