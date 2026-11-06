@@ -76,6 +76,15 @@ func (a *Adapter) GenerateVideo(ctx context.Context, request provider.VideoReque
 		return provider.VideoResult{}, provider.WrapVideoStage(provider.VideoStageSubmitted, 0, fmt.Errorf("Muse 视频提示已发送但未记录会话，无法安全恢复"))
 	}
 	job := mediaJob{Kind: mediaVideo, Prompt: videoPrompt(request), Thread: checkpoint.Thread, InputDigests: checkpoint.InputDigests}
+	if request.Progress != nil {
+		lastProgress := 0
+		job.OnProgress = func(value int) {
+			if value > lastProgress {
+				lastProgress = value
+				request.Progress(value)
+			}
+		}
+	}
 	sent := false
 	if job.Thread == "" {
 		// The first frame goes first: the prompt names it as the first image.
@@ -121,6 +130,7 @@ func (a *Adapter) GenerateVideo(ctx context.Context, request provider.VideoReque
 		}
 		return provider.VideoResult{}, provider.WrapVideoStage(provider.VideoStagePoll, 0, err)
 	}
+	job.reportProgress(90) // Downloaded and checked against uploaded originals; storage remains.
 	asset, err := a.assets.SaveVideo(ctx, request.JobID, cmp.Or(file.MIME, "video/mp4"), bytes.NewReader(file.Data))
 	if err != nil {
 		return provider.VideoResult{}, provider.NewMediaPostProcessingError(provider.MediaPostProcessingStorage, err)

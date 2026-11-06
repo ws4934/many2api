@@ -357,6 +357,13 @@ func (p *page) waitMedia(ctx context.Context, job mediaJob, baseline []string, s
 					}
 				}
 			}
+			// The Stop button can also mean "still sending". Only a reply or
+			// attachment is evidence that the agent advanced beyond submission.
+			if st.Ready != nil || st.Pending > 0 {
+				job.reportProgress(60)
+			} else if st.MD != "" && !st.Stuck {
+				job.reportProgress(40)
+			}
 			if st.Ready != nil {
 				return foundMedia{Src: st.Ready.Src, W: st.Ready.W, H: st.Ready.H}, nil
 			}

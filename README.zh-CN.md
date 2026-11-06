@@ -362,7 +362,7 @@ Authorization: Bearer g2a_xxx_xxx
 | `GET` | `/v1/stt`、`/v1/realtime` | 代理语音 WebSocket 会话 |
 | `GET` | `/v1/media/images/{asset_id}`、`/v1/media/videos/{asset_id}` | 读取归档媒体 |
 
-视频查询返回的 `progress` 由后端平滑估算，客户端直接展示即可：每轮生成按时间推进，最多领先上游实测进度 15 个百分点，任务完成前不超过 99%。切换账户或同账户重新生成时从低进度重新开始；恢复已提交的上游任务时保留本轮进度。排队和终止状态不继续估算。
+视频查询返回的 `progress` 由后端平滑估算，客户端直接展示即可：每轮生成按时间推进，最多领先上游进度或渠道阶段值 15 个百分点，任务完成前不超过 99%。切换账户或同账户重新生成时从低进度重新开始；恢复已提交的上游任务时保留本轮进度。排队和终止状态不继续估算。
 
 stored response 和 compact 取决于最终 Provider。登录管理端后可在 `/docs` 查看当前模型与调用示例；仅在 `server.swaggerEnabled: true` 时提供 Swagger。
 

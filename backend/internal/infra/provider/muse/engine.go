@@ -83,6 +83,15 @@ type mediaJob struct {
 	// OnThread receives the thread path once the prompt is sent, so a restart
 	// can resume the job instead of sending it again.
 	OnThread func(path string) error
+	// OnProgress reports observed milestones, not an upstream render percentage:
+	// 20 sent/resumed, 40 reply observed, 60 attachment appeared, 90 downloaded.
+	OnProgress func(int)
+}
+
+func (j mediaJob) reportProgress(value int) {
+	if j.OnProgress != nil {
+		j.OnProgress(value)
+	}
 }
 
 type mediaFile struct {

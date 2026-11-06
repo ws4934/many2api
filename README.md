@@ -403,7 +403,7 @@ Authorization: Bearer g2a_xxx_xxx
 | `GET`           | `/v1/stt`, `/v1/realtime`                                    | Proxy voice WebSocket sessions       |
 | `GET`           | `/v1/media/images/{asset_id}`, `/v1/media/videos/{asset_id}` | Read archived media                  |
 
-Video polling returns a backend-smoothed `progress` that clients can display directly. Each generation advances with elapsed time, at most 15 percentage points ahead of the upstream measurement and never above 99% before completion. A new generation resets the estimate, whether on the same or a different account; resuming an accepted upstream task preserves it. Queued and terminal jobs do not advance their estimates.
+Video polling returns a backend-smoothed `progress` that clients can display directly. Each generation advances with elapsed time, at most 15 percentage points ahead of the upstream percentage or provider milestone and never above 99% before completion. A new generation resets the estimate, whether on the same or a different account; resuming an accepted upstream task preserves it. Queued and terminal jobs do not advance their estimates.
 
 Stored responses and compact depend on the selected Provider. The signed-in admin console provides live examples at `/docs`; Swagger is available only when `server.swaggerEnabled: true`.
 

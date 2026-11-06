@@ -3,9 +3,10 @@ package media
 import "time"
 
 // DisplayProgress projects video progress at read time, without timers or
-// periodic database writes. Progress itself remains the upstream measurement.
+// periodic database writes. Progress retains the reported upstream percentage
+// or provider milestone.
 // Like Grok's initial estimate, the clock advances at 100 points per minute,
-// but may lead the last measurement by at most 15 points. An upstream stall
+// but may lead the last reported value by at most 15 points. An upstream stall
 // therefore stops the estimate rather than pretending the job is nearly done.
 func (j Job) DisplayProgress(now time.Time) int {
 	if j.Kind == KindImage {

@@ -88,6 +88,7 @@ func (e *browserEngine) Generate(ctx context.Context, s session, job mediaJob) (
 			}
 		}
 		var err error
+		job.reportProgress(20)
 		file, err = p.waitGeneratedMedia(ctx, job, baseline, sentAt)
 		return err
 	})
