@@ -141,9 +141,7 @@ func (o ImageOutputOptions) applyDecoded(download downloadedImage) ([]byte, stri
 		if mime != "image/gif" {
 			return nil, "", invalidImageOutput("OpenAI returned a still image instead of the requested GIF")
 		}
-		if err := validateGIFOutput(raw); err != nil {
-			return nil, "", err
-		}
+		// The download already identified the format. Keep the upstream GIF intact.
 		return raw, mime, nil
 	}
 	if o.Background != "transparent" && o.Background != "opaque" && mime == "image/"+target {

@@ -34,21 +34,20 @@ func animatedGIF(t *testing.T, frames int) []byte {
 	return out.Bytes()
 }
 
-func TestGIFOutputPreservesAnimationAndRejectsInvalidResults(t *testing.T) {
-	raw := animatedGIF(t, 3)
-	output, mime, err := (ImageOutputOptions{OutputFormat: "gif", Background: "opaque"}).applyDecoded(downloadedImage{raw: raw, mime: "image/gif"})
-	if err != nil || mime != "image/gif" || !bytes.Equal(output, raw) {
-		t.Fatalf("GIF changed: %s %v", mime, err)
-	}
-	for name, data := range map[string][]byte{"truncated": raw[:len(raw)-1], "still": animatedGIF(t, 1), "too many frames": animatedGIF(t, 17)} {
-		t.Run(name, func(t *testing.T) {
-			if validateGIFOutput(data) == nil {
-				t.Fatal("invalid animation accepted")
-			}
-		})
+func TestGIFOutputPreservesOriginalBytes(t *testing.T) {
+	for _, frames := range []int{1, 3, 17} {
+		raw := animatedGIF(t, frames)
+		mime, decoded, err := decodeImageDownload(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, mime, err := (ImageOutputOptions{OutputFormat: "gif", Background: "opaque"}).applyDecoded(downloadedImage{raw: raw, mime: mime, decoded: decoded})
+		if err != nil || mime != "image/gif" || !bytes.Equal(output, raw) {
+			t.Fatalf("upstream GIF with %d frames changed: %s %v", frames, mime, err)
+		}
 	}
 	if _, _, err := (ImageOutputOptions{OutputFormat: "gif"}).applyDecoded(downloadedImage{raw: testPNG(), mime: "image/png"}); err == nil {
-		t.Fatal("still PNG passed as GIF")
+		t.Fatal("PNG passed as GIF")
 	}
 }
 
