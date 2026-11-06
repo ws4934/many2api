@@ -30,7 +30,7 @@ services:
       - no-new-privileges:true
 
   # ================================ WARP ================================
-  # 如果出口 IP 不干净，可取消以下注释使用 WARP 作为落地代理。
+  # 如果出口 IP 不干净，可运行 docker compose --profile warp up -d，使用 WARP 作为落地代理。
   # 启用后，在管理端“设置 -> 出口代理”中新增 socks5://warp:1080。
 
   warp:
