@@ -12,20 +12,11 @@ import (
 	"testing"
 )
 
-func TestImageOutputOptionsValidateAndPrompt(t *testing.T) {
+func TestImageOutputOptionsPrompt(t *testing.T) {
 	for _, background := range []string{"", "auto", "transparent", "opaque"} {
 		options := ImageOutputOptions{Background: background, OutputFormat: "png"}
-		if err := options.Validate(); err != nil {
-			t.Fatal(err)
-		}
 		if strings.Contains(strings.ToLower(options.promptSuffix()), "remove") {
 			t.Fatal("output options became a removal operation")
-		}
-	}
-	for _, options := range []ImageOutputOptions{{Background: "clear"}, {Background: "transparent", OutputFormat: "jpeg"}, {OutputFormat: "jpg"}, {OutputFormat: "tiff"}} {
-		var param *ImageOptionError
-		if !errors.As(options.Validate(), &param) {
-			t.Fatalf("accepted unsupported options: %+v", options)
 		}
 	}
 	if (ImageOutputOptions{}).promptSuffix() != "" || (ImageOutputOptions{Background: "auto"}).promptSuffix() != "" {
@@ -124,9 +115,6 @@ func TestImageOutputFormatRoundTrips(t *testing.T) {
 				background = "auto"
 			}
 			options := ImageOutputOptions{Background: background, OutputFormat: format}
-			if err := options.Validate(); err != nil {
-				t.Fatal(err)
-			}
 			raw, mime, err := options.applyDecoded(downloadedImage{raw: input.Bytes(), mime: "image/png"})
 			if err != nil || mime != "image/"+format {
 				t.Fatalf("encode: %s %v", mime, err)

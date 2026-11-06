@@ -54,8 +54,8 @@ func TestGIFOutputPreservesOriginalBytes(t *testing.T) {
 func TestGIFRequestContract(t *testing.T) {
 	a := &Adapter{}
 	n, delay, zero := 3, 230, 0
-	base := provider.ImageRequestOptions{UpstreamModel: "gpt-image-2.6", OutputFormat: "gif", FrameCount: &n, FrameDurationMS: &delay, Complexity: "high"}
-	for _, model := range []string{"gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "codex-gpt-image-2.6-flare", "codex-gpt-image-2.6-sunburst"} {
+	base := provider.ImageRequestOptions{UpstreamModel: "codex-gpt-image-2.6-flare", OutputFormat: "gif", FrameCount: &n, FrameDurationMS: &delay, Complexity: "high"}
+	for _, model := range []string{"gpt-image-2", "gpt-image-2.5", "gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "codex-gpt-image-2.6-flare", "codex-gpt-image-2.6-sunburst"} {
 		o := base
 		o.UpstreamModel = model
 		if err := a.ValidateImageRequest(o); err != nil {
@@ -63,7 +63,7 @@ func TestGIFRequestContract(t *testing.T) {
 		}
 	}
 	for name, change := range map[string]func(*provider.ImageRequestOptions){
-		"old model":    func(o *provider.ImageRequestOptions) { o.UpstreamModel = "gpt-image-2" },
+		"old model":    func(o *provider.ImageRequestOptions) { o.UpstreamModel = "codex-gpt-image-2.5" },
 		"stream":       func(o *provider.ImageRequestOptions) { o.Streaming = true },
 		"partial":      func(o *provider.ImageRequestOptions) { o.PartialImages = 1 },
 		"mask":         func(o *provider.ImageRequestOptions) { o.Edit = true; o.InputImages = 1; o.HasMask = true },
@@ -82,6 +82,26 @@ func TestGIFRequestContract(t *testing.T) {
 				t.Fatal("unsupported GIF request accepted")
 			}
 		})
+	}
+}
+
+func TestWebGIFHintsAreNotNativeAPILimits(t *testing.T) {
+	a := &Adapter{}
+	frames, delay := 30, 10
+	for _, model := range []string{"gpt-image-2.5", "gpt-image-2.6"} {
+		job := imageJob{model: model, outputFormat: "gif", size: "16:9", frameCount: &frames, frameDurationMS: &delay}
+		// Routing validates before adaptation; a ratio must reach that adapter.
+		if err := a.ValidateImageRequest(job.options()); err != nil {
+			t.Fatalf("Web hints rejected: %v", err)
+		}
+		job = job.adapted()
+		if job.size != "1024x576" || job.outputFormat != "gif" {
+			t.Fatalf("adapted job = %+v", job)
+		}
+		prompt := (ImageOutputOptions{OutputFormat: job.outputFormat, Size: job.size, FrameCount: job.frameCount, FrameDurationMS: job.frameDurationMS}).promptSuffix()
+		if !strings.Contains(prompt, "frame_count: 30") || !strings.Contains(prompt, "frame_duration_ms: 10") || !strings.Contains(prompt, "1024x576") {
+			t.Fatalf("hints lost: %s", prompt)
+		}
 	}
 }
 

@@ -149,12 +149,13 @@ Build 从上游 `/v1/models` 同步模型。以下条目是代码的已知模型
 - Codex 付费套餐名单：Plus、Pro、Team、Business、Enterprise、Edu。Codex 路由都不接可恢复的异步图片任务。
 - `provider.chatgpt.imageConversationModel` 配置可覆盖 Web 图片路由选用的对话模型。
 
-**GPT Image 2.6 GIF**
+**GIF 输出：Web 提示与 Codex 原生参数**
 
 - Images 生成、编辑接口接受 `output_format: "gif"`；Web 还支持 Responses `image_generation` 工具及后台图片任务。Codex 继续使用 Images API，不接可恢复任务。
-- `frame_count` 为 2–16；`frame_duration_ms` 至少 20 ms。省略时 Codex 使用上游默认值（9 帧、200 ms/帧）；Web 只把明确提供的值写入提示词，实际帧数、帧间隔由图片工具决定。
+- Codex 2.6 的 `frame_count` 为 2–16，`frame_duration_ms` 至少 20 ms；省略时使用上游默认值（9 帧、200 ms/帧）。Web 将明确提供的帧数、间隔作为提示，不套用这些数值限制，实际结果由图片工具决定。
+- Web 不按 2／2.5／2.6 兼容别名限制 GIF 请求；是否能生成取决于账号实际使用的图片工具。Codex 的 GIF 模型限制保持为原生 2.6 Flare／Sunburst。
 - `complexity` 接受 low／medium／high：Codex 直接透传，Web 作为规划复杂度提示，不改变 `quality`。
-- GIF 不支持 `stream: true`、非零 `partial_images`、蒙版、`output_compression` 或透明背景请求。尺寸为 auto 或每边为 16 倍数的正整数；最终限制由上游模型执行，Web 尺寸仍属于提示。
+- GIF 不支持 `stream: true`、非零 `partial_images`、蒙版、`output_compression` 或透明背景请求。Codex GIF 尺寸为 auto 或每边为 16 倍数的正整数；Web 沿用尺寸／比例适配后写入提示词，例如 `16:9`。
 - 原始 GIF 字节直接归档并以 `image/gif` 返回，保留所有帧、延迟、循环与 disposal 信息；不会放大、重新编码成静态图，也不会把返回的 PNG 冒充 GIF。
 
 ```json

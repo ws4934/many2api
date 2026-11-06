@@ -36,23 +36,6 @@ type ImageOptionError struct {
 
 func (e *ImageOptionError) Error() string { return e.Message }
 
-func (o ImageOutputOptions) Validate() error {
-	switch o.Background {
-	case "", "auto", "transparent", "opaque":
-	default:
-		return &ImageOptionError{Param: "background", Message: "background must be auto, transparent, or opaque"}
-	}
-	switch o.OutputFormat {
-	case "", "png", "jpeg", "webp", "gif":
-	default:
-		return &ImageOptionError{Param: "output_format", Message: "output_format must be png, jpeg, webp, or gif"}
-	}
-	if o.Background == "transparent" && (o.OutputFormat == "jpeg" || o.OutputFormat == "gif") {
-		return &ImageOptionError{Param: "output_format", Message: "background=transparent requires output_format=png or webp"}
-	}
-	return nil
-}
-
 func (o ImageOutputOptions) EffectiveFormat() string {
 	if o.OutputFormat == "" {
 		return "png"

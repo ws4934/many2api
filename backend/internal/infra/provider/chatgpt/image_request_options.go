@@ -22,16 +22,22 @@ func validateImageOutputRequest(o provider.ImageRequestOptions) error {
 		}
 		return nil
 	}
-	switch strings.TrimPrefix(o.UpstreamModel, codexImagePrefix) {
-	case "gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst":
-	default:
-		return invalidRequest("GIF output requires a GPT Image 2.6 route")
-	}
 	if o.Streaming || o.PartialImages != 0 || o.HasMask || o.OutputCompression != nil {
 		return invalidRequest("GIF output does not support streaming, partial_images, masks, or output_compression")
 	}
 	if o.Background == "transparent" {
 		return invalidRequest("background=transparent requires output_format=png or webp")
+	}
+	// Web routes are aliases for a conversation image tool. Its prompt hints
+	// are not subject to the native Images API's model and numeric limits.
+	engine, native := codexImageEngine(o.UpstreamModel)
+	if !native {
+		return nil
+	}
+	switch engine {
+	case "gpt-image-2.6-flare", "gpt-image-2.6-sunburst":
+	default:
+		return invalidRequest("GIF output requires a GPT Image 2.6 Codex route")
 	}
 	if o.FrameCount != nil && (*o.FrameCount < 2 || *o.FrameCount > 16) {
 		return invalidRequest("frame_count must be between 2 and 16")
