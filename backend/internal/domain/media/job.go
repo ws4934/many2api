@@ -112,6 +112,10 @@ type Job struct {
 	InputImageCount   int
 	RequestParameters *requestparams.Parameters
 	UpstreamURL       string
+	// ProgressStartedAt anchors display estimates for the current video generation.
+	// A fresh attempt resets it; resuming an accepted task preserves it.
+	ProgressStartedAt *time.Time
+
 	// ResultAssetID is the job's result in local media storage: the video, or
 	// the image once delivered.
 	ResultAssetID string

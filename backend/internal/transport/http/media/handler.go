@@ -323,7 +323,7 @@ func (h *Handler) jobDTO(job mediadomain.Job) mediaJobDTO {
 	}
 	return mediaJobDTO{
 		ID: job.ID, Kind: string(job.Kind), Provider: job.Provider, Model: job.Model, Operation: string(job.Operation),
-		Prompt: job.Prompt, Status: string(job.Status), Progress: job.Progress, Seconds: job.Seconds, Size: job.Size, Quality: job.Quality,
+		Prompt: job.Prompt, Status: string(job.Status), Progress: job.DisplayProgress(time.Now()), Seconds: job.Seconds, Size: job.Size, Quality: job.Quality,
 		AccountName: job.AccountName, ClientKeyName: job.ClientKeyName,
 		CreatedAt: job.CreatedAt.Format("2006-01-02T15:04:05Z"), CompletedAt: completedAt,
 		ErrorCode: job.ErrorCode, ErrorMessage: message, AssetID: assetID, AssetIDs: assetIDs, AssetURLs: assetURLs,

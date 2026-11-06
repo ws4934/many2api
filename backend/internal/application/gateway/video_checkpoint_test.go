@@ -28,6 +28,7 @@ import (
 // checkpointVideoAdapter persists an upstream ID like Console and resumes
 // from it instead of creating another job.
 type checkpointVideoAdapter struct {
+	observed        func(provider.VideoRequest)
 	rejectedOutputs int
 	mu              sync.Mutex
 	calls           []string
@@ -47,6 +48,9 @@ func (a *checkpointVideoAdapter) Definition() provider.Definition {
 }
 
 func (a *checkpointVideoAdapter) GenerateVideo(_ context.Context, request provider.VideoRequest) (provider.VideoResult, error) {
+	if a.observed != nil {
+		a.observed(request)
+	}
 	a.mu.Lock()
 	a.calls = append(a.calls, fmt.Sprintf("%d:%s", request.Credential.ID, request.Checkpoint))
 	a.mu.Unlock()
@@ -228,6 +232,9 @@ func TestVideoJobResumesCheckpointOnSubmittingAccountAndMarksUnknownSubmissionUn
 		t.Fatalf("claim = %v %v", ok, err)
 	}
 	claimed.Checkpoint, claimed.Submitted = `{"request_id":"up-1"}`, true
+	started := now.Add(-time.Minute)
+	claimed.ProgressStartedAt = &started
+	claimed.Progress = 50
 	if err := f.jobs.UpdateMediaJob(ctx, claimed); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +243,7 @@ func TestVideoJobResumesCheckpointOnSubmittingAccountAndMarksUnknownSubmissionUn
 	if want := fmt.Sprintf("%d:{\"request_id\":\"up-1\"}", f.accounts[1].ID); len(f.adapter.calls) != 1 || f.adapter.calls[0] != want {
 		t.Fatalf("resume calls = %v, want %s", f.adapter.calls, want)
 	}
-	if stored.Status != media.StatusCompleted || stored.AccountID != f.accounts[1].ID || stored.Generation != 2 {
+	if stored.Status != media.StatusCompleted || stored.AccountID != f.accounts[1].ID || stored.Generation != 2 || stored.ProgressStartedAt == nil || !stored.ProgressStartedAt.Equal(started) {
 		t.Fatalf("resumed job = %#v", stored)
 	}
 
@@ -303,10 +310,22 @@ func TestRejectedVideoOutputSwitchesAccountInSameJob(t *testing.T) {
 	f.adapter.rejectedOutputs = 1
 	f.service.UpdateVideoMaxAttempts(3)
 	job := f.pricedJob(t, "video_rejected_result_failover")
+	var starts []time.Time
+	f.adapter.observed = func(request provider.VideoRequest) {
+		current := f.job(t, job.ID)
+		if current.Progress != 1 || current.ProgressStartedAt == nil || current.DisplayProgress(time.Now()) > 2 {
+			t.Fatalf("fresh attempt retained progress: %+v", current)
+		}
+		starts = append(starts, *current.ProgressStartedAt)
+		request.Progress(100) // Even a rejected completed stream must not leak into the next attempt.
+	}
 	f.service.processMediaJob(context.Background(), job.ID)
 	stored := f.job(t, job.ID)
 	if stored.Status != media.StatusCompleted || stored.AccountID != f.accounts[0].ID || stored.ErrorCode != "" || len(f.adapter.calls) != 2 {
 		t.Fatalf("job=%+v calls=%v", stored, f.adapter.calls)
+	}
+	if len(starts) != 2 || !starts[1].After(starts[0]) {
+		t.Fatalf("attempt anchors = %v", starts)
 	}
 	first := strings.SplitN(f.adapter.calls[0], ":", 2)
 	second := strings.SplitN(f.adapter.calls[1], ":", 2)

@@ -434,7 +434,7 @@ func (r *MediaJobRepository) UpdateMediaJob(ctx context.Context, value media.Job
 	}
 	// InputJSON and InputImageCount are immutable creation metadata. Progress and
 	// terminal updates must not resend a multi-megabyte Base64 payload.
-	result := query.Select("request_id", "client_key_name", "account_id", "account_name", "egress_node_id", "egress_node_name", "egress_scope", "egress_mode", "provider", "model", "model_route_id", "upstream_model", "prompt", "seconds", "size", "quality", "status", "progress", "upstream_url", "result_asset_id", "checkpoint_json", "submitted", "content_type", "error_code", "error_message", "lease_until", "claim_token", "updated_at", "completed_at", "usage_recorded_at", "price_id", "pricing_model", "price_ticks").Updates(updates)
+	result := query.Select("request_id", "client_key_name", "account_id", "account_name", "egress_node_id", "egress_node_name", "egress_scope", "egress_mode", "provider", "model", "model_route_id", "upstream_model", "prompt", "seconds", "size", "quality", "status", "progress", "progress_started_at", "upstream_url", "result_asset_id", "checkpoint_json", "submitted", "content_type", "error_code", "error_message", "lease_until", "claim_token", "updated_at", "completed_at", "usage_recorded_at", "price_id", "pricing_model", "price_ticks").Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -564,7 +564,7 @@ func (r *MediaJobRepository) ListMediaJobs(ctx context.Context, input repository
 	// usage_recorded_at distinguishes settled jobs from pending audit recovery.
 	if err := query.Select(
 		"id", "kind", "provider", "client_key_name", "account_id", "account_name", "model", "operation", "prompt", "seconds", "size", "quality",
-		"status", "progress", "result_asset_id", "checkpoint_json", "submitted", "error_code", "error_message", "created_at", "completed_at", "usage_recorded_at",
+		"status", "progress", "progress_started_at", "result_asset_id", "checkpoint_json", "submitted", "error_code", "error_message", "created_at", "completed_at", "usage_recorded_at",
 	).Offset(input.Page.Offset).Limit(input.Page.Limit).Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
@@ -699,7 +699,7 @@ func mediaJobFromDomain(value media.Job) *mediaJobModel {
 		Provider: value.Provider,
 		Model:    value.Model, ModelRouteID: value.ModelRouteID, UpstreamModel: value.UpstreamModel, Operation: string(operation),
 		Prompt: value.Prompt, Seconds: value.Seconds, Size: value.Size, Quality: value.Quality,
-		Status: string(value.Status), Progress: value.Progress, InputJSON: value.InputJSON, InputImageCount: value.InputImageCount, UpstreamURL: value.UpstreamURL,
+		Status: string(value.Status), Progress: value.Progress, ProgressStartedAt: value.ProgressStartedAt, InputJSON: value.InputJSON, InputImageCount: value.InputImageCount, UpstreamURL: value.UpstreamURL,
 		ResultAssetID: value.ResultAssetID, CheckpointJSON: checkpoint, Submitted: value.Submitted,
 		ParamsJSON: string(params), IdempotencyKey: value.IdempotencyKey, PayloadHash: value.PayloadHash, Generation: value.Generation,
 		RequestParametersJSON: "{}",
@@ -740,7 +740,7 @@ func mediaJobToDomain(row mediaJobModel) media.Job {
 		Provider: row.Provider,
 		Model:    row.Model, ModelRouteID: row.ModelRouteID, UpstreamModel: row.UpstreamModel, Operation: operation,
 		Prompt: row.Prompt, Seconds: row.Seconds, Size: row.Size, Quality: row.Quality,
-		Status: media.Status(row.Status), Progress: row.Progress, InputJSON: row.InputJSON, InputImageCount: row.InputImageCount, UpstreamURL: row.UpstreamURL,
+		Status: media.Status(row.Status), Progress: row.Progress, ProgressStartedAt: row.ProgressStartedAt, InputJSON: row.InputJSON, InputImageCount: row.InputImageCount, UpstreamURL: row.UpstreamURL,
 		ResultAssetID: row.ResultAssetID, Checkpoint: row.CheckpointJSON, Submitted: row.Submitted,
 		Params: params, IdempotencyKey: row.IdempotencyKey, PayloadHash: row.PayloadHash, Generation: row.Generation,
 		RequestParameters: requestparams.Parse(row.RequestParametersJSON),

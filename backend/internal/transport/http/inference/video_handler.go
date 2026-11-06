@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chenyme/grok2api/backend/internal/application/gateway"
 	mediadomain "github.com/chenyme/grok2api/backend/internal/domain/media"
@@ -475,7 +476,7 @@ func videoGenerationResponse(job mediadomain.Job, contentURLs ...string) gin.H {
 			"error":  gin.H{"code": officialVideoErrorCode(job.ErrorCode), "message": message},
 		}
 	default:
-		return gin.H{"status": "pending", "model": job.Model, "progress": min(99, max(0, job.Progress))}
+		return gin.H{"status": "pending", "model": job.Model, "progress": job.DisplayProgress(time.Now())}
 	}
 }
 

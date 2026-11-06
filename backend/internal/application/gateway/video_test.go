@@ -1188,6 +1188,7 @@ func TestVideoAttemptPolicyStandaloneAndUnlimited(t *testing.T) {
 }
 
 type videoCreateFailoverAdapter struct {
+	observed func(provider.VideoRequest)
 	mu       sync.Mutex
 	failures map[uint64]int
 	status   int
@@ -1206,6 +1207,9 @@ func (a *videoCreateFailoverAdapter) Definition() provider.Definition {
 }
 
 func (a *videoCreateFailoverAdapter) GenerateVideo(_ context.Context, request provider.VideoRequest) (provider.VideoResult, error) {
+	if a.observed != nil {
+		a.observed(request)
+	}
 	a.mu.Lock()
 	a.attempts = append(a.attempts, request.Credential.ID)
 	remaining := a.failures[request.Credential.ID]
@@ -1323,7 +1327,20 @@ func TestVideoWebForbiddenRetriesPinnedAccountOnceThenFailsOver(t *testing.T) {
 	if err := mediaRepo.CreateMediaJob(ctx, job); err != nil {
 		t.Fatal(err)
 	}
+	var progressStarts []time.Time
+	adapter.observed = func(request provider.VideoRequest) {
+		current, err := mediaRepo.GetMediaJob(ctx, job.ID, job.ClientKeyID)
+		if err != nil || current.Progress != 1 || current.ProgressStartedAt == nil {
+			t.Fatalf("attempt progress: %+v, %v", current, err)
+		}
+		progressStarts = append(progressStarts, *current.ProgressStartedAt)
+		request.Progress(90)
+	}
 	service.runVideoJob(ctx, job, route)
+	adapter.observed = nil
+	if len(progressStarts) != 3 || !progressStarts[1].After(progressStarts[0]) || !progressStarts[2].After(progressStarts[1]) {
+		t.Fatalf("retry anchors = %v", progressStarts)
+	}
 
 	if attempts := adapter.Attempts(); len(attempts) != 3 || attempts[0] != first.ID || attempts[1] != first.ID || attempts[2] != second.ID {
 		t.Fatalf("video attempts = %#v, want first, first, second", attempts)

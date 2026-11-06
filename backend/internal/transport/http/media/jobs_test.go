@@ -196,3 +196,12 @@ func TestAdminMediaJobsListStatsActionsAndDelete(t *testing.T) {
 		t.Fatalf("resume: %d %v", code, envelope)
 	}
 }
+
+func TestVideoJobDTOUsesSharedDisplayProgress(t *testing.T) {
+	start := time.Now().Add(-time.Minute)
+	job := mediadomain.Job{Kind: mediadomain.KindVideo, Status: mediadomain.StatusInProgress, Progress: 20, ProgressStartedAt: &start}
+	value := (&Handler{}).jobDTO(job)
+	if value.Progress != 35 || job.Progress != 20 {
+		t.Fatalf("DTO progress = %d, raw = %d", value.Progress, job.Progress)
+	}
+}

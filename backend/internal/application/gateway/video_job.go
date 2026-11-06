@@ -185,7 +185,15 @@ func (s *Service) runVideoJob(parent context.Context, job media.Job, route model
 				continue
 			}
 		}
-		if job.AccountID != credential.ID || job.AccountName != credential.DisplayName() {
+		// Only a fresh generation resets display progress. Resuming an accepted
+		// upstream task keeps its attempt, even across worker recovery.
+		freshGeneration := !job.Submitted
+		if freshGeneration {
+			progressStartedAt := time.Now().UTC()
+			job.ProgressStartedAt = &progressStartedAt
+			job.Progress = 1
+		}
+		if freshGeneration || job.AccountID != credential.ID || job.AccountName != credential.DisplayName() {
 			job.AccountID, job.AccountName = credential.ID, credential.DisplayName()
 			_ = s.saveMediaJob(ctx, &job)
 		}

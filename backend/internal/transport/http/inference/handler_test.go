@@ -676,6 +676,11 @@ func TestVideoGenerationResponseMatchesOfficialPollingShape(t *testing.T) {
 	if pending["status"] != "pending" || pending["progress"] != 42 || pending["model"] != "grok-imagine-video" || pending["video"] != nil {
 		t.Fatalf("pending response=%#v", pending)
 	}
+	started := now.Add(-time.Minute)
+	smooth := videoGenerationResponse(mediadomain.Job{Status: mediadomain.StatusInProgress, Progress: 20, ProgressStartedAt: &started})
+	if smooth["progress"] != 35 {
+		t.Fatalf("smoothed polling response = %#v", smooth)
+	}
 	done := videoGenerationResponse(mediadomain.Job{Model: "grok-imagine-video", Status: mediadomain.StatusCompleted, Progress: 100, Seconds: 8, UpstreamURL: "https://assets.grok.com/video.mp4", CompletedAt: &now})
 	video, ok := done["video"].(gin.H)
 	if done["status"] != "done" || done["progress"] != 100 || !ok || video["url"] != "https://assets.grok.com/video.mp4" || video["duration"] != 8 || video["respect_moderation"] != true || done["video_url"] != video["url"] {
