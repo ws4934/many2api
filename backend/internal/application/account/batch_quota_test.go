@@ -38,7 +38,7 @@ func TestBatchRefreshQuotaSupportsWebAndConsole(t *testing.T) {
 			}
 			repository := relational.NewAccountRepository(database)
 			ids := make([]uint64, 0, 2)
-			for index := 1; index <= 2; index++ {
+			for index := 1; index <= 3; index++ {
 				value, _, createErr := repository.UpsertByIdentity(ctx, accountdomain.Credential{
 					Provider: providerValue, AuthType: accountdomain.AuthTypeSSO,
 					Name: fmt.Sprintf("account-%d", index), SourceKey: fmt.Sprintf("source-%d", index),
@@ -52,18 +52,24 @@ func TestBatchRefreshQuotaSupportsWebAndConsole(t *testing.T) {
 			adapter := &selectedQuotaAdapter{providerValue: providerValue}
 			service := NewService(repository, nil, nil, nil, provider.NewRegistry(adapter), cipher, memory.NewLockStore())
 
-			succeeded, failed, err := service.BatchRefreshQuota(ctx, ids)
+			if err := repository.MarkReauthRequired(ctx, ids[2], "invalid"); err != nil {
+				t.Fatal(err)
+			}
+			succeeded, failed, skipped, err := service.BatchRefreshQuota(ctx, ids)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if succeeded != 2 || failed != 0 || adapter.calls.Load() != 2 {
+			if succeeded != 2 || skipped != 1 || failed != 0 || adapter.calls.Load() != 2 {
 				t.Fatalf("succeeded=%d failed=%d calls=%d", succeeded, failed, adapter.calls.Load())
 			}
 			windows, err := repository.GetQuotaWindows(ctx, ids)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, id := range ids {
+			if len(windows[ids[2]]) != 0 {
+				t.Fatal("invalid account was synced")
+			}
+			for _, id := range ids[:2] {
 				if len(windows[id]) != 1 || windows[id][0].Remaining != 7 {
 					t.Fatalf("account %d windows = %#v", id, windows[id])
 				}

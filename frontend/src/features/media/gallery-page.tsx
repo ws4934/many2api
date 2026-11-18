@@ -193,7 +193,6 @@ export function GalleryPage() {
             total={result.total}
             onPageChange={setPage}
             onPageSizeChange={(value) => { setPageSize(value); setPage(1); }}
-            // Tiles are not virtualized and each video tile fetches its own metadata.
             pageSizeOptions={[20, 50, 100]}
           />
         ) : undefined}
@@ -241,6 +240,7 @@ export function GalleryPage() {
 function AssetCard({ asset, providers, locale, selectionMode, selected, onSelectedChange, onOpen }: { asset: MediaAssetDTO; providers?: ProviderDTO[]; locale: string; selectionMode: boolean; selected: boolean; onSelectedChange: (checked: boolean) => void; onOpen: () => void }) {
   const { t } = useTranslation();
   const path = mediaAssetPath(asset.kind, asset.id);
+  const [posterFailed, setPosterFailed] = useState(false);
   return (
     <article className="group relative min-w-0 [content-visibility:auto] [contain-intrinsic-size:0_320px]">
       <Checkbox
@@ -257,9 +257,10 @@ function AssetCard({ asset, providers, locale, selectionMode, selected, onSelect
       >
         {asset.kind === "video" ? (
           <>
-            {/* The media fragment makes the browser fetch metadata and paint an early frame as the poster. */}
-            <video src={`${path}#t=0.1`} preload="metadata" muted playsInline className="pointer-events-none size-full object-cover" />
-            <span className="absolute bottom-2 right-2 flex size-6 items-center justify-center rounded-full bg-background/85 shadow-sm backdrop-blur-sm"><Play className="size-3" /></span>
+            {posterFailed ? <Play aria-hidden="true" className="mx-auto size-10 text-muted-foreground/60" /> : (
+              <img src={`${path}/poster`} alt="" loading="lazy" decoding="async" className="size-full object-cover" onError={() => setPosterFailed(true)} />
+            )}
+            {!posterFailed && <span className="absolute bottom-2 right-2 flex size-6 items-center justify-center rounded-full bg-background/85 shadow-sm backdrop-blur-sm"><Play className="size-3" /></span>}
           </>
         ) : (
           <img src={path} alt={asset.prompt || asset.id} loading="lazy" decoding="async" className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.025]" />

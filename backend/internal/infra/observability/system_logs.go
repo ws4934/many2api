@@ -19,7 +19,7 @@ func WithSystemLogs(logger *slog.Logger, sink LogSink, instanceID string) *slog.
 	if logger == nil {
 		logger = slog.Default()
 	}
-	stored := slog.NewJSONHandler(&logWriter{sink: sink, instanceID: diagnostic.Text(instanceID, 128)}, &slog.HandlerOptions{Level: slog.LevelInfo})
+	stored := slog.NewJSONHandler(&logWriter{sink: sink, instanceID: diagnostic.Text(instanceID, 128)}, &slog.HandlerOptions{Level: slog.LevelWarn})
 	return slog.New(&logHandler{base: logger.Handler(), stored: stored})
 }
 

@@ -124,7 +124,7 @@ func (h *Handler) update(c *gin.Context) {
 	if value.EnabledChanged && result.CooldownUntil != nil && time.Now().UTC().Before(*result.CooldownUntil) {
 		result.EnabledDoesNotClearCooldown = true
 	}
-	if request.BuildSuperEntitled != nil {
+	if request.BuildSuperEntitled != nil && value.Credential.AuthStatus != accountdomain.AuthStatusReauthRequired {
 		if synchronizer, ok := h.sync.(accountModelSynchronizer); ok {
 			result.ModelSyncFailed = synchronizer.SyncModels(c.Request.Context(), id) != nil
 		}

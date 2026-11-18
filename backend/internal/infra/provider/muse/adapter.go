@@ -39,6 +39,7 @@ type Adapter struct {
 	fetchRemote RemoteFetcher
 	engine      engine
 	logger      *slog.Logger
+	cookieStore CookieStore
 	// sessionURL renews the session cookie and wakeURL starts the cloud VM;
 	// fields for tests.
 	sessionURL, wakeURL string
@@ -50,6 +51,13 @@ func NewAdapter(cfg Config, egress *infraegress.Manager, cipher *security.Cipher
 	a.engine = newBrowserEngine(a.config, a.log)
 	return a
 }
+
+// CookieStore saves a rotation without changing authorization, expiry or refresh health.
+type CookieStore interface {
+	UpdateMuseCookieJar(ctx context.Context, id uint64, expectedRefresh, encryptedJar string) error
+}
+
+func (a *Adapter) SetCookieStore(store CookieStore) { a.cookieStore = store }
 
 func (a *Adapter) Provider() account.Provider { return account.ProviderMuse }
 

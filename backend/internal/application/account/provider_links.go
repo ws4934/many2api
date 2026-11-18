@@ -35,6 +35,9 @@ func (s *Service) syncAccountIdentity(ctx context.Context, id uint64) error {
 	if err != nil {
 		return mapRepositoryError(err)
 	}
+	if value.AuthStatus == accountdomain.AuthStatusReauthRequired {
+		return accountdomain.ErrReauthRequired
+	}
 	if s.providers == nil {
 		return fmt.Errorf("Provider 注册表未初始化")
 	}

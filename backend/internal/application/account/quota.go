@@ -105,6 +105,9 @@ func (s *Service) RefreshQuota(ctx context.Context, id uint64) ([]accountdomain.
 		return s.refreshQuota(ctx, id)
 	})
 	refreshed, ok := result.(quotaRefreshResult)
+	if errors.Is(err, accountdomain.ErrReauthRequired) {
+		return nil, err
+	}
 	if err != nil {
 		stage := refreshed.failureStage
 		if stage == "" {
@@ -154,6 +157,9 @@ func (s *Service) refreshQuota(ctx context.Context, id uint64) (result quotaRefr
 	value, err := s.accounts.Get(ctx, id)
 	if err != nil {
 		return quotaRefreshResult{}, mapRepositoryError(err)
+	}
+	if value.AuthStatus == accountdomain.AuthStatusReauthRequired {
+		return quotaRefreshResult{}, accountdomain.ErrReauthRequired
 	}
 	source = value.Provider
 	stage = "adapter"
@@ -353,6 +359,9 @@ func (s *Service) refreshQuotaGroup(ctx context.Context, id uint64, group string
 	if err != nil {
 		return quotaRefreshResult{}, mapRepositoryError(err)
 	}
+	if value.AuthStatus == accountdomain.AuthStatusReauthRequired {
+		return quotaRefreshResult{}, accountdomain.ErrReauthRequired
+	}
 	adapter, ok := s.providers.QuotaGroup(value.Provider)
 	if !ok {
 		return quotaRefreshResult{}, fmt.Errorf("%s quota group Provider 未注册", value.Provider)
@@ -380,6 +389,9 @@ func (s *Service) refreshQuotaMode(ctx context.Context, id uint64, mode string) 
 	value, err := s.accounts.Get(ctx, id)
 	if err != nil {
 		return quotaRefreshResult{}, mapRepositoryError(err)
+	}
+	if value.AuthStatus == accountdomain.AuthStatusReauthRequired {
+		return quotaRefreshResult{}, accountdomain.ErrReauthRequired
 	}
 	adapter, ok := s.providers.Quota(value.Provider)
 	if !ok {
@@ -632,22 +644,24 @@ func (s *Service) quotaWindowControlsRouting(providerValue accountdomain.Provide
 
 // SyncAllQuotasWithProgress 尽力同步一个 Provider 全部启用账号的额度：
 // 窗口额度 Provider 同步额度窗口，Billing Provider 同步 Billing 快照。
-func (s *Service) SyncAllQuotasWithProgress(ctx context.Context, providerValue accountdomain.Provider, progress BatchProgressObserver) (int, int, error) {
+func (s *Service) SyncAllQuotasWithProgress(ctx context.Context, providerValue accountdomain.Provider, progress BatchProgressObserver) (int, int, int, error) {
 	quotaKind, ok := s.providers.QuotaKind(providerValue)
 	if !ok {
-		return 0, 0, fmt.Errorf("%w: Provider %s 未注册", ErrUnsupported, providerValue)
+		return 0, 0, 0, fmt.Errorf("%w: Provider %s 未注册", ErrUnsupported, providerValue)
 	}
-	ids, err := s.accounts.ListEnabledAccountIDs(ctx, providerValue, false)
+	ids, skipped, err := s.accounts.ListMaintenanceAccountIDs(ctx, providerValue, false)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	if quotaKind == provider.QuotaBilling {
-		return s.refreshBillings(ctx, ids, progress)
+		done, failed, n, err := s.refreshBillings(ctx, ids, progress)
+		return done, failed, skipped + n, err
 	}
-	return s.runAccountBatch(ctx, string(providerValue)+"_quota_sync", ids, s.syncPool, progress, func(workCtx context.Context, id uint64) error {
+	done, failed, n, err := s.runMaintenanceBatch(ctx, string(providerValue)+"_quota_sync", ids, s.syncPool, progress, func(workCtx context.Context, id uint64) error {
 		_, err := s.RefreshQuota(workCtx, id)
 		return err
 	})
+	return done, failed, skipped + n, err
 }
 
 // SyncQuotaAccounts 同步指定账号集合的额度窗口，供追赶任务复用共享并发池。
@@ -696,12 +710,12 @@ func (s *Service) ResetAllBuildQuotaState(ctx context.Context) (int64, error) {
 }
 
 // BatchRefreshQuota 使用有限并发同步选中 Web 或 Console 账号的额度窗口。
-func (s *Service) BatchRefreshQuota(ctx context.Context, ids []uint64) (int, int, error) {
+func (s *Service) BatchRefreshQuota(ctx context.Context, ids []uint64) (int, int, int, error) {
 	values, err := normalizeBatchIDs(ids)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	return s.runAccountBatch(ctx, "quota_sync", values, s.syncPool, nil, func(workCtx context.Context, id uint64) error {
+	return s.runMaintenanceBatch(ctx, "quota_sync", values, s.syncPool, nil, func(workCtx context.Context, id uint64) error {
 		_, err := s.RefreshQuota(workCtx, id)
 		return err
 	})

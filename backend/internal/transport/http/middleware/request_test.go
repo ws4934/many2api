@@ -284,3 +284,18 @@ func TestAccessLogRecordsTheErrorAnswered(t *testing.T) {
 		t.Fatalf("logs = %s", logs.String())
 	}
 }
+
+func TestFailedSingleAccountAccessLogIdentifiesOnlyAccountRoutes(t *testing.T) {
+	var logs bytes.Buffer
+	router := gin.New()
+	router.Use(AccessLog(slog.New(slog.NewJSONHandler(&logs, nil))))
+	for _, route := range []string{"accounts/:id/refresh-quota", "accounts/web/:id/nsfw", "client-keys/:id", "accounts/batch/refresh-quotas"} {
+		router.POST("/api/admin/v1/"+route, func(c *gin.Context) { c.Status(502) })
+		logs.Reset()
+		router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/api/admin/v1/"+strings.Replace(route, ":id", "1951", 1), nil))
+		want := strings.HasPrefix(route, "accounts/") && strings.Contains(route, ":id")
+		if strings.Contains(logs.String(), `"account_id":1951`) != want {
+			t.Fatalf("%s: %s", route, logs.String())
+		}
+	}
+}

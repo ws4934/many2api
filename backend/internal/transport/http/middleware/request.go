@@ -146,6 +146,13 @@ func AccessLog(logger *slog.Logger) gin.HandlerFunc {
 		} else if c.Writer.Status() >= 400 {
 			level = slog.LevelWarn
 		}
+		// Only single-account admin routes own an upstream account ID. Never
+		// infer it from a query, an unmatched path or another resource's :id.
+		if level >= slog.LevelWarn && strings.HasPrefix(path, "/api/admin/v1/accounts/") {
+			if id, err := strconv.ParseUint(c.Param("id"), 10, 64); err == nil && id > 0 {
+				attrs = append(attrs, "account_id", id)
+			}
+		}
 		logger.Log(c.Request.Context(), level, "http_request", attrs...)
 	}
 }

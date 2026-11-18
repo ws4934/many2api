@@ -103,6 +103,8 @@ func (h *Handler) writeServiceError(c *gin.Context, code string, err error, fall
 		response.Error(c, http.StatusBadRequest, code, err.Error())
 	case errors.Is(err, accountapp.ErrAccountPoolMismatch):
 		response.Error(c, http.StatusConflict, "accountPoolMismatch", err.Error())
+	case errors.Is(err, accountdomain.ErrReauthRequired):
+		response.Error(c, http.StatusConflict, "accountReauthRequired", err.Error())
 	case errors.Is(err, accountapp.ErrConflict):
 		response.Error(c, http.StatusConflict, code, err.Error())
 	case errors.Is(err, accountapp.ErrNotFound):

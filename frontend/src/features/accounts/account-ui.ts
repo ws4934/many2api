@@ -3,7 +3,7 @@ import type { ComponentType } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { z } from "zod";
 
-import type { AccountBatchResultDTO, AccountDTO, AccountTaskProgressDTO, AccountUpdateInput } from "@/features/accounts/accounts-api";
+import type { AccountMaintenanceResultDTO, AccountDTO, AccountTaskProgressDTO, AccountUpdateInput } from "@/features/accounts/accounts-api";
 
 // Contract between the generic accounts page and the provider UI modules in ./providers.
 
@@ -48,7 +48,7 @@ export type ProviderAccountUI = {
   // An exhausted window of this mode shows the account as waiting for reset.
   blockingQuotaMode?: string;
   // Overrides the provider refresh-quotas task and the per-account quota refresh.
-  syncAll?: (onProgress: (value: AccountTaskProgressDTO) => void, signal: AbortSignal) => Promise<AccountBatchResultDTO>;
+  syncAll?: (onProgress: (value: AccountTaskProgressDTO) => void, signal: AbortSignal) => Promise<AccountMaintenanceResultDTO>;
   refreshQuota?: (id: string) => Promise<unknown>;
   // Quota dialogs offer a local quota reset next to the sync.
   quotaReset?: boolean;

@@ -20,7 +20,7 @@
   state() {
     if (location.protocol === 'chrome-error:') return 'error';
     const body = document.body ? document.body.innerText || '' : '';
-    const ta = document.querySelector('textarea');
+    const ta = this.composerTextarea();
     const nav = performance.getEntriesByType('navigation')[0];
     if (!ta && (location.hostname !== 'muse.ai' || !location.pathname.startsWith('/thread') || (nav && nav.responseStatus === 401))
       && /\blog ?in\b|\bsign ?in\b|登录|登入|ログイン/i.test(body)) return 'login';
@@ -183,8 +183,14 @@
     return render(root).trim();
   },
 
+  composerTextarea() {
+    const eligible = (e) => e?.matches('textarea') && this.visible(e)
+      && getComputedStyle(e).visibility === 'visible'
+      && !e.closest('aside,nav,[role=navigation],[inert],[data-testid="hatch-side-chats-panel-shell"],div[class*="hatch-chat-groupable-bubble"]');
+    return eligible(document.activeElement) ? document.activeElement : [...document.querySelectorAll('textarea')].find(eligible);
+  },
   setPrompt(text) {
-    const ta = document.querySelector('textarea');
+    const ta = this.composerTextarea();
     if (!ta) return false;
     ta.focus();
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(ta, text);
@@ -193,32 +199,39 @@
   },
   // clickSend clicks Send once React has enabled it.
   clickSend() {
-    const b = [...document.querySelectorAll('button[aria-label]')]
-      .find((x) => /^(send|发送|傳送|送出)$/i.test(x.getAttribute('aria-label').trim()));
-    if (!b || b.disabled) return false;
+    const label = /^(send( message)?|发送(消息)?|發送(訊息)?|傳送(訊息)?|送出)$/i;
+    const testId = /^(hatch-composer-send-button|composer-send-button|send-button)$/i;
+    const [b] = this.composerElements('button,[role=button]', (e) => this.visible(e)
+      && getComputedStyle(e).visibility === 'visible'
+      && !e.closest('aside,nav,[role=navigation],[data-testid="hatch-side-chats-panel-shell"]')
+      && (testId.test(e.dataset.testid || '') || label.test((e.getAttribute('aria-label') || '').trim()) || label.test(e.innerText.trim())), true);
+    if (!b || b.matches(':disabled,[aria-disabled="true"]') || b.closest('[inert]')) return false;
     b.click();
     return true;
   },
   sent(users) {
-    const ta = document.querySelector('textarea');
+    const ta = this.composerTextarea();
     return this.userCount() > users || (!!ta && ta.value === '');
   },
 
   // Old composers used a form; newer ones put the textarea and attachments
   // in sibling divs. Never fall back to the whole page (history has inputs too).
-  composerRoots() {
-    const ta = document.querySelector('textarea');
+  composerRoots(forSend) {
+    const ta = this.composerTextarea();
     if (!ta) return [];
     const form = ta.closest('form');
     if (form) return [form];
     const roots = [];
-    for (let el = ta.parentElement; el && el !== document.body && roots.length < 4; el = el.parentElement) roots.push(el);
+    for (let el = ta.parentElement; el && el !== document.body; el = el.parentElement) {
+      roots.push(el);
+      if (forSend ? el.matches('section,main,[role=main]') : roots.length === 4) break;
+    }
     return roots;
   },
-  composerElements(selector, accept = () => true) {
-    for (const root of this.composerRoots()) {
+  composerElements(selector, accept = () => true, forSend = false) {
+    for (const root of this.composerRoots(forSend)) {
       const elements = [...root.querySelectorAll(selector)].filter((e) =>
-        accept(e) && !e.closest('[class*="hatch-chat-groupable-bubble"],[class*="chat-user-bubble"],[class*="group/msg"]'));
+        accept(e) && !e.closest('div[class*="hatch-chat-groupable-bubble"],div[class*="chat-user-bubble"],div[class*="group/msg"]'));
       if (elements.length) return elements;
     }
     return [];

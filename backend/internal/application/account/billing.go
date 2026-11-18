@@ -114,39 +114,43 @@ func (s *Service) HasBillingSnapshot(ctx context.Context, id uint64) (bool, erro
 
 // SyncAllBilling 尽力刷新全部启用账号，单个账号失败不阻断其他账号。
 func (s *Service) SyncAllBilling(ctx context.Context) (int, int, error) {
-	return s.SyncAllBillingWithProgress(ctx, nil)
+	ok, failed, _, err := s.SyncAllBillingWithProgress(ctx, nil)
+	return ok, failed, err
 }
 
-func (s *Service) SyncAllBillingWithProgress(ctx context.Context, progress BatchProgressObserver) (int, int, error) {
+func (s *Service) SyncAllBillingWithProgress(ctx context.Context, progress BatchProgressObserver) (int, int, int, error) {
 	if s.providers == nil {
-		return 0, 0, fmt.Errorf("Provider 注册表未初始化")
+		return 0, 0, 0, fmt.Errorf("Provider 注册表未初始化")
 	}
+	skipped := 0
 	ids := make([]uint64, 0)
 	for _, providerValue := range s.providers.Providers() {
 		quotaKind, ok := s.providers.QuotaKind(providerValue)
 		if !ok || quotaKind != provider.QuotaBilling {
 			continue
 		}
-		providerIDs, err := s.accounts.ListEnabledAccountIDs(ctx, providerValue, false)
+		providerIDs, n, err := s.accounts.ListMaintenanceAccountIDs(ctx, providerValue, false)
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, 0, err
 		}
+		skipped += n
 		ids = append(ids, providerIDs...)
 	}
-	return s.refreshBillings(ctx, ids, progress)
+	done, failed, n, err := s.refreshBillings(ctx, ids, progress)
+	return done, failed, skipped + n, err
 }
 
 // BatchRefreshBilling 使用有限并发刷新选中账号，避免大量账号同步时串行阻塞或无界创建 goroutine。
-func (s *Service) BatchRefreshBilling(ctx context.Context, ids []uint64) (int, int, error) {
+func (s *Service) BatchRefreshBilling(ctx context.Context, ids []uint64) (int, int, int, error) {
 	values, err := normalizeBatchIDs(ids)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	return s.refreshBillings(ctx, values, nil)
 }
 
-func (s *Service) refreshBillings(ctx context.Context, ids []uint64, progress BatchProgressObserver) (int, int, error) {
-	return s.runAccountBatch(ctx, "billing_sync", ids, s.syncPool, progress, func(workCtx context.Context, id uint64) error {
+func (s *Service) refreshBillings(ctx context.Context, ids []uint64, progress BatchProgressObserver) (int, int, int, error) {
+	return s.runMaintenanceBatch(ctx, "billing_sync", ids, s.syncPool, progress, func(workCtx context.Context, id uint64) error {
 		_, err := s.RefreshBilling(workCtx, id)
 		return err
 	})

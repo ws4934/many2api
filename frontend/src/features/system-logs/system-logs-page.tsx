@@ -18,12 +18,12 @@ import { useDebouncedValue } from "@/shared/hooks/use-debounced-value";
 import { cn } from "@/shared/lib/cn";
 import { formatCompactDateTime, formatNumber } from "@/shared/lib/format";
 import { getSystemLogs } from "./system-logs-api";
-import { logReason, logSummary, type LogFilters, type SystemLog } from "./system-logs-model";
+import { logAccountLabel, logProbeNode, logReason, logSummary, type LogFilters, type SystemLog } from "./system-logs-model";
 
 export function SystemLogsPage() {
   const { t, i18n } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const filters = useMemo<LogFilters>(() => ({ search: params.get("search") ?? "", level: params.get("level") ?? "", provider: params.get("provider") ?? "", accountId: params.get("accountId") ?? "", requestId: params.get("requestId") ?? "" }), [params]);
+  const filters = useMemo<LogFilters>(() => ({ search: params.get("search") ?? "", level: params.get("level") === "INFO" ? "" : params.get("level") ?? "", provider: params.get("provider") ?? "", accountId: params.get("accountId") ?? "", requestId: params.get("requestId") ?? "" }), [params]);
   const debounced = useDebouncedValue(filters);
   const scope = JSON.stringify(debounced);
   const [pagination, setPagination] = useState({ scope, cursors: [""] });
@@ -43,6 +43,7 @@ export function SystemLogsPage() {
   const change = (key: keyof LogFilters, value: string) => setParams((current) => {
     const next = new URLSearchParams(current); if (value) next.set(key, value); else next.delete(key); return next;
   }, { replace: true });
+  const sourceLabel = (entry: SystemLog) => logProbeNode(entry) || providerLabel(entry.provider) || "—";
   const eventLabel = (entry: SystemLog) => t(`systemLogs.events.${entry.message}`, { defaultValue: entry.message });
   const providerLabel = (value: string) => providers.find((provider) => provider.id === value)?.name ?? value;
 
@@ -76,7 +77,7 @@ export function SystemLogsPage() {
       <div className="relative min-w-56 flex-1"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label={t("systemLogs.search")} placeholder={t("systemLogs.search")} value={filters.search} maxLength={200} onChange={(event) => change("search", event.target.value)} className="bg-secondary/50 pl-9" /></div>
       <Select value={filters.level || "all"} onValueChange={(value) => change("level", value === "all" ? "" : value)}>
         <SelectTrigger className="w-32 bg-secondary/50" aria-label={t("systemLogs.level")}><SelectValue /></SelectTrigger>
-        <SelectContent>{["all", "ERROR", "WARN", "INFO"].map((level) => <SelectItem key={level} value={level}>{t(`systemLogs.levels.${level}`)}</SelectItem>)}</SelectContent>
+        <SelectContent>{["all", "ERROR", "WARN"].map((level) => <SelectItem key={level} value={level}>{t(`systemLogs.levels.${level}`)}</SelectItem>)}</SelectContent>
       </Select>
       <Select value={filters.provider || "all"} onValueChange={(value) => change("provider", value === "all" ? "" : value)}>
         <SelectTrigger className="w-40 bg-secondary/50" aria-label={t("systemLogs.provider")}><SelectValue /></SelectTrigger>
@@ -94,7 +95,7 @@ export function SystemLogsPage() {
     </div>}>
       {query.isError ? <ErrorState message={query.error.message} onRetry={() => void query.refetch()} /> : <Table>
         <TableHeader><TableRow>
-          <TableHead className="w-44">{t("systemLogs.time")}</TableHead><TableHead className="w-24">{t("systemLogs.level")}</TableHead><TableHead>{t("systemLogs.event")}</TableHead><TableHead className="w-40">{t("systemLogs.source")}</TableHead><TableHead className="w-32">{t("systemLogs.account")}</TableHead><TableHead className="w-40">{t("systemLogs.requestId")}</TableHead><TableHead className="w-20"><span className="sr-only">{t("systemLogs.detail")}</span></TableHead>
+          <TableHead className="w-44">{t("systemLogs.time")}</TableHead><TableHead className="w-24">{t("systemLogs.level")}</TableHead><TableHead>{t("systemLogs.event")}</TableHead><TableHead className="w-40">{t("systemLogs.source")}</TableHead><TableHead className="w-44">{t("systemLogs.account")}</TableHead><TableHead className="w-40">{t("systemLogs.requestId")}</TableHead><TableHead className="w-20"><span className="sr-only">{t("systemLogs.detail")}</span></TableHead>
         </TableRow></TableHeader>
         <TableBody>
           {query.isPending ? <TableLoadingRow colSpan={7} /> : !query.data?.items.length ? <TableRow><TableCell colSpan={7}><EmptyState message={t("systemLogs.empty")} /></TableCell></TableRow> : query.data.items.map((entry) => <TableRow key={entry.id}>
@@ -104,8 +105,11 @@ export function SystemLogsPage() {
               {eventLabel(entry) !== entry.message && <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{entry.message}</p>}
               {logSummary(entry) && <p className="mt-1 line-clamp-2 break-words text-sm text-muted-foreground">{logSummary(entry)}</p>}
             </TableCell>
-            <TableCell className="align-top"><p>{providerLabel(entry.provider) || "—"}</p><p className="mt-1 max-w-36 truncate font-mono text-xs text-muted-foreground" title={entry.instanceId}>{entry.instanceId}</p></TableCell>
-            <TableCell className="align-top">{entry.accountId ? <button className="font-mono text-sm hover:underline" onClick={() => change("accountId", String(entry.accountId))}>#{entry.accountId}</button> : "—"}</TableCell>
+            <TableCell className="align-top"><p>{sourceLabel(entry)}</p><p className="mt-1 max-w-36 truncate font-mono text-xs text-muted-foreground" title={entry.instanceId}>{entry.instanceId}</p></TableCell>
+            <TableCell className="align-top">{entry.accountId ? <button className="max-w-44 text-left hover:underline" title={logAccountLabel(entry)} onClick={() => change("accountId", String(entry.accountId))}>
+              {entry.accountName && <span className="block truncate text-sm font-medium">{entry.accountName}</span>}
+              <span className="block font-mono text-xs text-muted-foreground">#{entry.accountId}</span>
+            </button> : "—"}</TableCell>
             <TableCell className="align-top">{entry.requestId ? <button className="max-w-36 truncate font-mono text-xs hover:underline" title={entry.requestId} onClick={() => change("requestId", entry.requestId)}>{entry.requestId}</button> : "—"}</TableCell>
             <TableCell className="align-top"><Button variant="ghost" size="sm" onClick={() => setSelected(entry)} aria-label={`${t("systemLogs.detail")} #${entry.id}`}>{t("systemLogs.detail")}</Button></TableCell>
           </TableRow>)}
@@ -119,8 +123,8 @@ export function SystemLogsPage() {
           <div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><LevelBadge level={selected.level} /><h2 className="break-all text-base font-medium">{eventLabel(selected)}</h2></div><Button variant="secondary" size="sm" onClick={() => void copy(selected)}><Copy />{t("common.copy")}</Button></div>
           {logReason(selected) && <p className="whitespace-pre-wrap break-words rounded-lg bg-secondary/50 p-4 text-sm">{logReason(selected)}</p>}
           <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">{[
-            [t("systemLogs.source"), `${providerLabel(selected.provider) || "—"} · ${selected.instanceId || "—"}`],
-            [t("systemLogs.accountId"), selected.accountId ? `#${selected.accountId}` : "—"],
+            [t("systemLogs.source"), [sourceLabel(selected), selected.instanceId].filter(Boolean).join(" · ")],
+            [t("systemLogs.account"), logAccountLabel(selected)],
             [t("systemLogs.event"), selected.message], [t("systemLogs.requestId"), selected.requestId || "—"],
           ].map(([label, value]) => <div key={label} className="min-w-0"><dt className="mb-1 text-muted-foreground">{label}</dt><dd className="break-all font-mono text-xs leading-5">{value}</dd></div>)}</dl>
           <div><h3 className="mb-2 text-sm font-medium">{t("systemLogs.fields")}</h3><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-secondary/50 p-4 font-mono text-xs leading-6">{JSON.stringify(selected.fields, null, 2)}</pre></div>

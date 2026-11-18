@@ -64,7 +64,7 @@ type accountBatchResponse struct {
 	Failed    int `json:"failed"`
 }
 
-type accountTokenRefreshResponse struct {
+type accountMaintenanceResponse struct {
 	Succeeded int `json:"succeeded"`
 	Failed    int `json:"failed"`
 	Skipped   int `json:"skipped"`
@@ -169,12 +169,12 @@ func (h *Handler) batchRefreshBilling(c *gin.Context) {
 	if !h.validateProviderIDs(c, ids, request.Provider) {
 		return
 	}
-	succeeded, failed, err := h.service.BatchRefreshBilling(c.Request.Context(), ids)
+	succeeded, failed, skipped, err := h.service.BatchRefreshBilling(c.Request.Context(), ids)
 	if err != nil {
 		h.writeServiceError(c, "billingBatchRefreshFailed", err, http.StatusBadGateway, "批量同步 Billing 失败")
 		return
 	}
-	response.Success(c, http.StatusOK, gin.H{"succeeded": succeeded, "failed": failed})
+	response.Success(c, http.StatusOK, gin.H{"succeeded": succeeded, "failed": failed, "skipped": skipped})
 }
 
 func (h *Handler) detectBuildAccounts(c *gin.Context) {
@@ -335,17 +335,17 @@ func (h *Handler) batchRefreshQuotas(c *gin.Context) {
 		return
 	}
 	definition, _ := h.service.ProviderDefinition(accountdomain.Provider(request.Provider))
-	var succeeded, failed int
+	var succeeded, failed, skipped int
 	if definition.Quota == provider.QuotaBilling {
-		succeeded, failed, err = h.service.BatchRefreshBilling(c.Request.Context(), ids)
+		succeeded, failed, skipped, err = h.service.BatchRefreshBilling(c.Request.Context(), ids)
 	} else {
-		succeeded, failed, err = h.service.BatchRefreshQuota(c.Request.Context(), ids)
+		succeeded, failed, skipped, err = h.service.BatchRefreshQuota(c.Request.Context(), ids)
 	}
 	if err != nil {
 		h.writeServiceError(c, "quotaBatchRefreshFailed", err, http.StatusBadGateway, "批量同步账号额度失败")
 		return
 	}
-	response.Success(c, http.StatusOK, gin.H{"succeeded": succeeded, "failed": failed})
+	response.Success(c, http.StatusOK, gin.H{"succeeded": succeeded, "failed": failed, "skipped": skipped})
 }
 
 func (h *Handler) batchRefreshTokens(c *gin.Context) {
@@ -377,12 +377,12 @@ func (h *Handler) batchRefreshTokens(c *gin.Context) {
 func (h *Handler) refreshAllBilling(c *gin.Context) {
 	stream := newAccountEventStream(c)
 	defer stream.Close()
-	succeeded, failed, err := h.service.SyncAllBillingWithProgress(c.Request.Context(), stream.ProgressObserver())
+	succeeded, failed, skipped, err := h.service.SyncAllBillingWithProgress(c.Request.Context(), stream.ProgressObserver())
 	if err != nil {
 		stream.WriteError("billingRefreshFailed", "刷新账号额度失败")
 		return
 	}
-	_ = stream.Write("complete", accountBatchResponse{Succeeded: succeeded, Failed: failed})
+	_ = stream.Write("complete", accountMaintenanceResponse{Succeeded: succeeded, Failed: failed, Skipped: skipped})
 }
 
 func (h *Handler) refreshAllTokens(c *gin.Context) {
@@ -393,7 +393,7 @@ func (h *Handler) refreshAllTokens(c *gin.Context) {
 		stream.WriteError("tokenRefreshFailed", "续期账号凭据失败")
 		return
 	}
-	_ = stream.Write("complete", accountTokenRefreshResponse{Succeeded: succeeded, Failed: failed, Skipped: skipped})
+	_ = stream.Write("complete", accountMaintenanceResponse{Succeeded: succeeded, Failed: failed, Skipped: skipped})
 }
 
 // refreshProviderQuotas syncs every enabled account of the provider: quota windows or billing, per its Definition.
@@ -404,10 +404,10 @@ func (h *Handler) refreshProviderQuotas(c *gin.Context) {
 	}
 	stream := newAccountEventStream(c)
 	defer stream.Close()
-	succeeded, failed, err := h.service.SyncAllQuotasWithProgress(c.Request.Context(), providerValue, stream.ProgressObserver())
+	succeeded, failed, skipped, err := h.service.SyncAllQuotasWithProgress(c.Request.Context(), providerValue, stream.ProgressObserver())
 	if err != nil {
 		stream.WriteError("quotaRefreshFailed", "同步账号额度失败")
 		return
 	}
-	_ = stream.Write("complete", accountBatchResponse{Succeeded: succeeded, Failed: failed})
+	_ = stream.Write("complete", accountMaintenanceResponse{Succeeded: succeeded, Failed: failed, Skipped: skipped})
 }

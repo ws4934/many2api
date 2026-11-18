@@ -202,7 +202,7 @@ Open `http://127.0.0.1:8000`. The image already includes the frontend; SQLite da
 
 ### View system logs
 
-Open **System logs** in the admin console to filter operational events by level, Provider, account ID, request ID, or error text. Quota-sync failure notifications link directly to the matching logs. Details include the failure stage, account, egress and retry delay when available. Cloudflare egress cooldowns return HTTP `503` with `Retry-After` rather than a generic sync error.
+**System logs** stores warnings and errors only. Account events show the account name at write time and its ID. Search by name or select the account to filter by ID. Failed egress probes identify the node instead. Quota-sync failure notifications link directly to the matching logs. Details include the failure stage, account, egress and retry delay when available. Cloudflare egress cooldowns return HTTP `503` with `Retry-After` rather than a generic sync error.
 
 The page reads redacted logs from the application database, retained for seven days and capped at 10,000 entries across instances. Writes are asynchronous and bounded; the page reports unsaved entries and storage errors for the current process. Collection starts with this feature—it does not import older Docker output. Docker stdout and the separate **Request audits** page remain available. No Docker socket or extra host permissions are required.
 
@@ -210,6 +210,10 @@ Routine admin polling, page/static-asset loads, health checks, and session renew
 
 Media tasks, gallery entries, and request audits display the current account label: an explicit name, otherwise its own email, a directly linked account email, then its generated identifier. Account labels are resolved in batches on admin reads; saved snapshots remain available after account deletion.
 
+
+Accounts marked **Invalid** no longer renew credentials or sync quotas. Batch and full refreshes count them as skipped. Reauthorize or import valid credentials to resume. An unassigned Muse workspace is temporary: existing accounts keep rotated cookies for the next attempt.
+
+The video gallery requests still posters until you open a video. Docker includes FFmpeg. For first-frame posters in a source deployment, put FFmpeg with the `fd:` input protocol on the service’s `PATH`. Playback works without it.
 
 ### Run from source
 

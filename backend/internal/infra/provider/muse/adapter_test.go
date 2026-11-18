@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -604,5 +605,61 @@ func TestVideoReferenceImages(t *testing.T) {
 	}
 	if !strings.Contains(job.Prompt, "first image attached to this message as its first frame, uses the other attached images as references") {
 		t.Fatalf("prompt = %q", job.Prompt)
+	}
+}
+
+type cookieWriter func(context.Context, uint64, string, string) error
+
+func (w cookieWriter) UpdateMuseCookieJar(ctx context.Context, id uint64, old, new string) error {
+	return w(ctx, id, old, new)
+}
+
+func TestSessionRotationWithoutSuccessfulRefresh(t *testing.T) {
+	a, c, _ := newTestAdapter(t, &fakeEngine{})
+	ctx := context.Background()
+	status := "unavailable"
+	var header string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header = r.Header.Get("Cookie")
+		if r.URL.Path == "/wake" {
+			http.SetCookie(w, &http.Cookie{Name: "hatch_gw", Value: "wake-new", Path: "/", Domain: "muse.ai"})
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "hatch_sess", Value: "sess-new", Path: "/", Domain: "muse.ai"})
+		_, _ = fmt.Fprintf(w, `{"status":%q,"vm_id":"vm-id","vm_state":"SLEEPING"}`, status)
+	}))
+	defer server.Close()
+	a.sessionURL = server.URL
+	a.wakeURL = server.URL + "/wake"
+	writes := 0
+	a.SetCookieStore(cookieWriter(func(_ context.Context, id uint64, old, encrypted string) error {
+		if id != c.ID || old != c.EncryptedRefreshToken {
+			t.Fatal("wrong credential replaced")
+		}
+		c.EncryptedRefreshToken = encrypted
+		c.EncryptedAccessToken = encrypted
+		writes++
+		return nil
+	}))
+	_, err := a.RefreshCredential(ctx, c)
+	var typed *provider.CredentialRefreshError
+	if !errors.As(err, &typed) || typed.Code != "muse_session_unassigned" || typed.Permanent || writes != 1 {
+		t.Fatalf("rotation on unavailable: %v writes=%d", err, writes)
+	}
+	_, err = a.RefreshCredential(ctx, c)
+	if err == nil || writes != 1 || !strings.Contains(header, "hatch_sess=sess-new") || strings.Contains(header, "sess-1") {
+		t.Fatal("next attempt did not use the saved cookie")
+	}
+	if _, err := a.PrepareImportedCredential(ctx, provider.CredentialSeed{RefreshToken: jarJSON(testJar)}); err == nil || writes != 1 {
+		t.Fatal("accepted unassigned initial import")
+	}
+	status = "assigned"
+	identity, err := a.SyncAccountIdentity(ctx, c)
+	if err != nil || identity.UserID != "vm-id" || writes != 2 {
+		t.Fatalf("identity rotation: %v writes=%d", err, writes)
+	}
+	jar, _ := a.jar(c.EncryptedRefreshToken)
+	if cookieValue(jar, "hatch_gw") != "wake-new" {
+		t.Fatal("wake rotation lost")
 	}
 }

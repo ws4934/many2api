@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var ErrReauthRequired = errors.New("账号已失效，请重新授权或导入新凭据")
+
 // Provider 表示上游能力来源。
 type Provider string
 

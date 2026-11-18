@@ -553,24 +553,8 @@ func TestCredentialRefreshFailureDistinguishesTransientAndPermanent(t *testing.T
 		t.Fatalf("permanent with expired token should be reauthRequired: %#v", finalState)
 	}
 	manualCount := adapter.refreshCount.Load()
-	manualOptions := ensureCredentialOptions{force: true, bypassCooldown: true, retryPermanentOnce: true}
-	if _, err := service.renewer.ensure(ctx, finalState, manualOptions); err == nil {
-		t.Fatal("manual retry should surface the repeated invalid_grant")
-	}
-	if adapter.refreshCount.Load() != manualCount+1 {
-		t.Fatalf("manual retry did not issue exactly one oauth request: before=%d after=%d", manualCount, adapter.refreshCount.Load())
-	}
-	adapter.refreshErr = nil
-	latest, err := service.accounts.Get(ctx, finalState.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recovered, err := service.renewer.ensure(ctx, latest, manualOptions)
-	if err != nil {
-		t.Fatalf("manual retry did not recover credential: %v", err)
-	}
-	if recovered.AuthStatus != accountdomain.AuthStatusActive || recovered.RefreshPermanent || recovered.LastRefreshErrorCode != "" {
-		t.Fatalf("manual recovery state = %#v", recovered)
+	if _, err := service.RefreshToken(ctx, finalState.ID); !errors.Is(err, accountdomain.ErrReauthRequired) || adapter.refreshCount.Load() != manualCount {
+		t.Fatalf("invalid account retried: %v", err)
 	}
 }
 
@@ -636,12 +620,9 @@ func TestCredentialRefreshConvergesRepeatedUnclassifiedAuthRejectionAfterExpiry(
 
 	adapter.refreshErr = nil
 	service.renewer.forget(credential.ID)
-	recovered, err := service.renewer.ensure(ctx, converged, ensureCredentialOptions{force: true, bypassCooldown: true, retryPermanentOnce: true})
-	if err != nil {
-		t.Fatalf("manual refresh did not recover unclassified reauth state: %v", err)
-	}
-	if recovered.AuthStatus != accountdomain.AuthStatusActive || recovered.RefreshPermanent || recovered.RefreshUnclassifiedAuthCount != 0 {
-		t.Fatalf("manual recovery state = %#v", recovered)
+	count := adapter.refreshCount.Load()
+	if _, err := service.RefreshToken(ctx, converged.ID); !errors.Is(err, accountdomain.ErrReauthRequired) || adapter.refreshCount.Load() != count {
+		t.Fatalf("invalid account retried: %v", err)
 	}
 }
 
@@ -808,15 +789,15 @@ func TestRefreshAllTokensSkipsUnrefreshableAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if succeeded != 3 || failed != 0 || skipped != 1 || adapter.refreshCount.Load() != 3 {
+	if succeeded != 2 || failed != 0 || skipped != 2 || adapter.refreshCount.Load() != 2 {
 		t.Fatalf("result = %d/%d/%d, refresh count = %d", succeeded, failed, skipped, adapter.refreshCount.Load())
 	}
-	if len(progress) != 4 || progress[0] != [2]int{0, 3} || progress[1] != [2]int{1, 3} || progress[2] != [2]int{2, 3} || progress[3] != [2]int{3, 3} {
+	if len(progress) != 3 || progress[0] != [2]int{0, 2} || progress[1] != [2]int{1, 2} || progress[2] != [2]int{2, 2} {
 		t.Fatalf("progress = %#v", progress)
 	}
 	recovered, err := service.accounts.Get(ctx, invalid.ID)
-	if err != nil || recovered.AuthStatus != accountdomain.AuthStatusActive {
-		t.Fatalf("invalid account was not recovered: %#v err=%v", recovered, err)
+	if err != nil || recovered.AuthStatus != accountdomain.AuthStatusReauthRequired {
+		t.Fatalf("invalid account changed: %#v err=%v", recovered, err)
 	}
 }
 
@@ -855,7 +836,7 @@ func TestBatchRefreshTokensRefreshesOnlySelectedEligibleAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if succeeded != 2 || failed != 0 || skipped != 2 || adapter.refreshCount.Load() != 2 {
+	if succeeded != 1 || failed != 0 || skipped != 3 || adapter.refreshCount.Load() != 1 {
 		t.Fatalf("result = %d/%d/%d, refresh count = %d", succeeded, failed, skipped, adapter.refreshCount.Load())
 	}
 	updated, err := service.accounts.Get(ctx, refreshable.ID)
@@ -866,8 +847,8 @@ func TestBatchRefreshTokensRefreshesOnlySelectedEligibleAccounts(t *testing.T) {
 		t.Fatalf("refreshed access token = %q", updated.EncryptedAccessToken)
 	}
 	recovered, err := service.accounts.Get(ctx, invalidID)
-	if err != nil || recovered.AuthStatus != accountdomain.AuthStatusActive {
-		t.Fatalf("selected invalid account was not recovered: %#v err=%v", recovered, err)
+	if err != nil || recovered.AuthStatus != accountdomain.AuthStatusReauthRequired {
+		t.Fatalf("selected invalid account changed: %#v err=%v", recovered, err)
 	}
 }
 

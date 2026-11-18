@@ -96,3 +96,33 @@ func TestLiveVideoAttachmentAfterReadyText(t *testing.T) {
 	}
 	t.Logf("delivered late video after %s", time.Since(start).Round(time.Millisecond))
 }
+
+func TestLiveComposerClicksOnlyItsSend(t *testing.T) {
+	p := blankPage(t, liveEngine(t))
+	ctx := context.Background()
+	for _, tc := range []struct {
+		attrs, text string
+		click       bool
+	}{
+		{`aria-label="Send message"`, "", true}, {`data-testid="hatch-composer-send-button"`, "", true}, {"", "发送消息", true},
+		{`aria-label="Send" aria-disabled="true"`, "", false}, {`aria-label="Send" disabled`, "", false}, {`aria-label="Send" inert`, "", false}, {"", "Send feedback", false},
+	} {
+		html := `<aside><textarea></textarea><button aria-label="Send">Send</button></aside><main><section><div><div><div><div><textarea></textarea></div></div></div></div><div class="hatch-chat-groupable-bubble"><button aria-label="Send"></button></div><button id="real" class="bg-chat-user-bubble" ` + tc.attrs + `>` + tc.text + `</button></section></main>`
+		setup := `document.body.innerHTML=` + mustJSON(html) + `;window.clicks=[];document.body.onclick=e=>window.clicks.push(e.target.id)`
+		if err := p.cmd(ctx, "Runtime.evaluate", map[string]any{"expression": setup}, nil); err != nil {
+			t.Fatal(err)
+		}
+		var ok bool
+		if err := p.js(ctx, "setPrompt", &ok, "hello"); err != nil || !ok {
+			t.Fatal("setPrompt", err)
+		}
+		if err := p.js(ctx, "clickSend", &ok); err != nil || ok != tc.click {
+			t.Fatalf("click %v: %v %v", tc, ok, err)
+		}
+		var result struct{ Result struct{ Value bool } }
+		expr := fmt.Sprintf(`document.querySelector("main textarea").value==="hello" && JSON.stringify(window.clicks)===JSON.stringify(%s)`, map[bool]string{true: `["real"]`, false: "[]"}[tc.click])
+		if err := p.cmd(ctx, "Runtime.evaluate", map[string]any{"expression": expr, "returnByValue": true}, &result); err != nil || !result.Result.Value {
+			t.Fatalf("wrong composer/control: %v", tc)
+		}
+	}
+}

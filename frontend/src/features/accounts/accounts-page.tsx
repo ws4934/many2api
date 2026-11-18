@@ -1131,7 +1131,7 @@ export function AccountsPage() {
                           <TooltipTrigger asChild><span tabIndex={0} className="cursor-help font-medium text-emerald-700 dark:text-emerald-300">{t("accountCredential.autoRefresh")}</span></TooltipTrigger>
                           <TooltipContent>{account.expiresAt ? t("accountCredential.expiresAt", { time: formatDateTime(account.expiresAt, i18n.language) }) : t("accountCredential.expiryUnknown")}</TooltipContent>
                         </Tooltip>
-                      ) : <span className="font-medium text-amber-700 dark:text-amber-300">{t("accountCredential.noAutoRefresh")}</span>}
+                      ) : <span className="font-medium text-amber-700 dark:text-amber-300">{t(account.authStatus === "reauthRequired" ? "accountCredential.needsReauth" : "accountCredential.noAutoRefresh")}</span>}
                     </TableCell> : null}
                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDateTime(account.createdAt, i18n.language)}</TableCell>
                     <TableActionCell>
@@ -1140,13 +1140,13 @@ export function AccountsPage() {
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => beginEdit(account)}><Pencil />{t("common.edit")}</DropdownMenuItem>
                           {RowMenuItems ? <RowMenuItems account={account} ctx={ctx} /> : null}
-                          {refreshable ? <DropdownMenuItem onClick={() => tokenMutation.mutate(account.id)}><RotateCw />{t("accounts.refreshToken")}</DropdownMenuItem> : null}
+                          {refreshable ? <DropdownMenuItem disabled={account.authStatus === "reauthRequired"} onClick={() => tokenMutation.mutate(account.id)}><RotateCw />{t("accounts.refreshToken")}</DropdownMenuItem> : null}
                           {account.cooldownUntil && new Date(account.cooldownUntil) > new Date() ? (
                             <DropdownMenuItem onClick={() => clearCooldownMutation.mutate(account.id)} disabled={clearCooldownMutation.isPending}>
                               <TimerOff />{t("accounts.clearCooldown")}
                             </DropdownMenuItem>
                           ) : null}
-                          <DropdownMenuItem onClick={() => quotaMutation.mutate(account.id)}><RefreshCw />{t("accounts.refreshModeQuota")}</DropdownMenuItem>
+                          <DropdownMenuItem disabled={account.authStatus === "reauthRequired"} onClick={() => quotaMutation.mutate(account.id)}><RefreshCw />{t("accounts.refreshModeQuota")}</DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { resetLinkedDeleteState(); setDeleting(account); }}><Trash2 />{t("common.delete")}</DropdownMenuItem>
                         </DropdownMenuContent>

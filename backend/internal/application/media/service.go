@@ -41,6 +41,7 @@ const InputAssetTTL = 24 * time.Hour
 
 // Service 负责图片/视频校验、文件落盘和元数据持久化的一致性收口。
 type Service struct {
+	posters       videoPosters
 	assets        repository.MediaAssetRepository
 	jobs          repository.MediaJobRepository
 	tickets       repository.MediaUploadTicketRepository
@@ -88,7 +89,7 @@ func NewService(assets repository.MediaAssetRepository, jobs repository.MediaJob
 // NewServiceWithTickets 构造包含视频上传票据能力的媒体服务。
 func NewServiceWithTickets(assets repository.MediaAssetRepository, jobs repository.MediaJobRepository, tickets repository.MediaUploadTicketRepository, objects repository.MediaObjectStorage, cleanupLock repository.DistributedLock, cfg Config) *Service {
 	return &Service{
-		assets: assets, jobs: jobs, tickets: tickets, objects: objects, cleanupLock: cleanupLock,
+		posters: newVideoPosters(), assets: assets, jobs: jobs, tickets: tickets, objects: objects, cleanupLock: cleanupLock,
 		publicBaseURL: strings.TrimRight(strings.TrimSpace(cfg.PublicBaseURL), "/"), maxImageBytes: cfg.MaxImageBytes,
 		maxTotalBytes: cfg.MaxTotalBytes, cleanupAt: cfg.CleanupThresholdPercent, cleanupEvery: cfg.CleanupInterval,
 		cleanupSignal: make(chan struct{}, 1), configChanged: make(chan struct{}, 1),

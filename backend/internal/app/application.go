@@ -261,6 +261,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (_ *Applic
 	adobeAdapter.SetLogger(logger)
 	museAdapter := museprovider.NewAdapter(museProviderConfig(cfg), egressManager, cipher, mediaService, mediatransport.FetchRemoteAttachment)
 	museAdapter.SetLogger(logger)
+	museAdapter.SetCookieStore(accountRepo)
 	providers := provider.NewRegistry(cliAdapter, webAdapter, consoleAdapter, chatgptAdapter, adobeAdapter, museAdapter)
 	if err := providers.Validate(); err != nil {
 		return nil, fmt.Errorf("校验 Provider 注册表: %w", err)

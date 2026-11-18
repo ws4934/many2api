@@ -56,6 +56,7 @@ func (h *Handler) RegisterPublic(router *gin.Engine) {
 	router.HEAD("/v1/media/images/:assetId", h.getImage)
 	router.GET("/v1/media/videos/:assetId", h.getVideo)
 	router.HEAD("/v1/media/videos/:assetId", h.getVideo)
+	router.GET("/v1/media/videos/:assetId/poster", h.getVideoPoster)
 	router.PUT("/v1/media/uploads/:token", h.putVideoUpload)
 }
 
@@ -110,6 +111,21 @@ func (h *Handler) getImage(c *gin.Context) {
 	}
 	c.Status(http.StatusOK)
 	_, _ = io.Copy(c.Writer, body)
+}
+
+func (h *Handler) getVideoPoster(c *gin.Context) {
+	data, err := h.service.VideoPoster(c.Request.Context(), c.Param("assetId"))
+	if errors.Is(err, mediaapp.ErrAssetNotFound) {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Data(http.StatusOK, "image/jpeg", data)
 }
 
 func (h *Handler) getVideo(c *gin.Context) {

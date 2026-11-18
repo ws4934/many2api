@@ -2,10 +2,12 @@ package relational
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/chenyme/grok2api/backend/internal/domain/account"
+	"github.com/chenyme/grok2api/backend/internal/repository"
 	"github.com/google/uuid"
 )
 
@@ -35,6 +37,45 @@ func TestAccountUpdateKeepsRenewedTokens(t *testing.T) {
 		if got.Name != "edited" || got.EncryptedAccessToken != "access-1" || got.EncryptedRefreshToken != "refresh-1" ||
 			!got.ExpiresAt.Equal(renewed.ExpiresAt) || got.LastRefreshAt == nil || got.AuthStatus != account.AuthStatusActive || got.BuildBotFlagSource != 2 {
 			t.Fatalf("after a stale update: name=%q access=%q refresh=%q expires=%v lastRefresh=%v auth=%s botFlag=%d", got.Name, got.EncryptedAccessToken, got.EncryptedRefreshToken, got.ExpiresAt, got.LastRefreshAt, got.AuthStatus, got.BuildBotFlagSource)
+		}
+	})
+}
+
+func TestMuseRotationPreservesHealthAndNewerCredentials(t *testing.T) {
+	accountStateDatabases(t, func(t *testing.T, db *Database) {
+		ctx := context.Background()
+		r := NewAccountRepository(db)
+		v, _, err := r.UpsertByIdentity(ctx, account.Credential{Provider: account.ProviderMuse, SourceKey: uuid.NewString(), EncryptedAccessToken: "primary", EncryptedRefreshToken: "original", Enabled: true, AuthStatus: account.AuthStatusActive})
+		if err != nil {
+			t.Fatal(err)
+		}
+		until := time.Now().UTC().Add(time.Hour)
+		if err = r.UpdateCredentialRefreshFailure(ctx, v.ID, repository.CredentialRefreshFailure{Count: 2, Code: "muse_session_unassigned", RetryAt: until}); err != nil {
+			t.Fatal(err)
+		}
+		if err = r.UpdateMuseCookieJar(ctx, v.ID, "original", "rotated"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := r.Get(ctx, v.ID)
+		if err != nil || got.EncryptedAccessToken != "rotated" || got.EncryptedRefreshToken != "rotated" || got.LastRefreshAt != nil || got.LastRefreshErrorCode != "muse_session_unassigned" || got.RefreshFailureCount != 2 || got.RefreshDueAt == nil {
+			t.Fatal("partial rotation changed refresh health", err)
+		}
+		if _, err = r.CommitCredentialRenewal(ctx, v, "stale", "stale", "", until, 0); !errors.Is(err, repository.ErrConflict) {
+			t.Fatal("stale exchange overwrote rotation", err)
+		}
+		if err = r.MarkReauthRequired(ctx, v.ID, "blocked"); err != nil {
+			t.Fatal(err)
+		}
+		if err = r.UpdateMuseCookieJar(ctx, v.ID, "rotated", "rejected"); err != nil {
+			t.Fatal(err)
+		}
+		got, err = r.Get(ctx, v.ID)
+		if err != nil || got.EncryptedAccessToken != "rotated" || got.AuthStatus != account.AuthStatusReauthRequired {
+			t.Fatal("partial rotation changed invalid account", err)
+		}
+		completed, err := r.CommitCredentialRenewal(ctx, got, "in-flight", "in-flight", "", until, 0)
+		if err != nil || completed.AuthStatus != account.AuthStatusReauthRequired || completed.LastError != "blocked" {
+			t.Fatal("in-flight renewal recovered invalid account", err)
 		}
 	})
 }

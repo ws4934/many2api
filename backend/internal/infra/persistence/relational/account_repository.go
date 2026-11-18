@@ -102,9 +102,9 @@ func (r *AccountRepository) List(ctx context.Context, input repository.AccountLi
 	}
 	if input.Filter.Refreshable != nil {
 		if *input.Filter.Refreshable {
-			query = query.Where("EXISTS (SELECT 1 FROM account_credentials credential WHERE credential.account_id = provider_accounts.id AND credential.encrypted_refresh <> '')")
+			query = query.Where("provider_accounts.auth_status <> ? AND EXISTS (SELECT 1 FROM account_credentials credential WHERE credential.account_id = provider_accounts.id AND credential.encrypted_refresh <> '')", account.AuthStatusReauthRequired)
 		} else {
-			query = query.Where("NOT EXISTS (SELECT 1 FROM account_credentials credential WHERE credential.account_id = provider_accounts.id AND credential.encrypted_refresh <> '')")
+			query = query.Where("(provider_accounts.auth_status = ? OR NOT EXISTS (SELECT 1 FROM account_credentials credential WHERE credential.account_id = provider_accounts.id AND credential.encrypted_refresh <> ''))", account.AuthStatusReauthRequired)
 		}
 	}
 	switch input.Filter.Risk {

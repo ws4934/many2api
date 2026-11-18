@@ -28,7 +28,7 @@ const credentialRenewalFlightTimeout = 3 * time.Minute
 // credentialRenewalAccounts is the account storage credential renewal reads and writes.
 type credentialRenewalAccounts interface {
 	Get(ctx context.Context, id uint64) (accountdomain.Credential, error)
-	UpdateTokens(ctx context.Context, id uint64, accessToken, refreshToken, state string, expiresAt time.Time, buildBotFlagSource int) (accountdomain.Credential, error)
+	CommitCredentialRenewal(ctx context.Context, expected accountdomain.Credential, accessToken, refreshToken, state string, expiresAt time.Time, buildBotFlagSource int) (accountdomain.Credential, error)
 	UpdateCredentialRefreshFailure(ctx context.Context, id uint64, failure repository.CredentialRefreshFailure) error
 }
 
@@ -80,6 +80,9 @@ func (s *Service) RenewRejectedCredential(ctx context.Context, value accountdoma
 }
 
 func (r *credentialRenewer) ensure(ctx context.Context, value accountdomain.Credential, options ensureCredentialOptions) (accountdomain.Credential, error) {
+	if value.AuthStatus == accountdomain.AuthStatusReauthRequired {
+		return accountdomain.Credential{}, accountdomain.ErrReauthRequired
+	}
 	if r.providers == nil || !r.providers.SupportsCredentialRefresh(value.Provider) {
 		if options.force {
 			return accountdomain.Credential{}, ErrUnsupported
@@ -196,7 +199,7 @@ func (r *credentialRenewer) ensure(ctx context.Context, value accountdomain.Cred
 			botFlagSource = metadata.BuildBotFlagSource
 		}
 		persistCtx, cancelPersist := context.WithTimeout(ctx, credentialStateWriteTimeout)
-		updated, err := r.accounts.UpdateTokens(persistCtx, latest.ID, refreshed.EncryptedAccessToken, refreshed.EncryptedRefreshToken, refreshed.EncryptedState, refreshed.ExpiresAt, botFlagSource)
+		updated, err := r.accounts.CommitCredentialRenewal(persistCtx, latest, refreshed.EncryptedAccessToken, refreshed.EncryptedRefreshToken, refreshed.EncryptedState, refreshed.ExpiresAt, botFlagSource)
 		cancelPersist()
 		if err != nil {
 			r.logger.Error("credential_refresh_token_write_failed",
@@ -209,6 +212,9 @@ func (r *credentialRenewer) ensure(ctx context.Context, value accountdomain.Cred
 				"error", err,
 			)
 			return accountdomain.Credential{}, err
+		}
+		if updated.AuthStatus == accountdomain.AuthStatusReauthRequired {
+			return accountdomain.Credential{}, accountdomain.ErrReauthRequired
 		}
 		r.invalidateBotFlags()
 		r.markSuccess(latest.ID, currentTime)
@@ -453,6 +459,9 @@ func normalizeCredentialRefreshErrorResponse(value string) string {
 // 并在 access token 到期后收敛账号状态。管理员显式刷新可通过
 // retryPermanentOnce 绕过一次；credential_decrypt_failed 等可恢复本地错误不受阻断。
 func (r *credentialRenewer) resolvePermanentFailure(ctx context.Context, credential accountdomain.Credential, now time.Time, force, retryPermanentOnce bool) (accountdomain.Credential, error, bool) {
+	if credential.AuthStatus == accountdomain.AuthStatusReauthRequired {
+		return accountdomain.Credential{}, accountdomain.ErrReauthRequired, true
+	}
 	if !credential.RefreshPermanent {
 		return accountdomain.Credential{}, nil, false
 	}
@@ -502,27 +511,22 @@ func (s *Service) RefreshAllTokensWithProgress(ctx context.Context, progress Bat
 	if s.providers == nil {
 		return 0, 0, 0, fmt.Errorf("Provider 注册表未初始化")
 	}
-	allIDs := make([]uint64, 0)
+	skipped := 0
 	ids := make([]uint64, 0)
-	for _, providerValue := range s.refreshableProviders() {
-		providerIDs, err := s.accounts.ListEnabledCredentialRefreshAccountIDs(ctx, providerValue, false)
+	for _, source := range s.refreshableProviders() {
+		eligible, n, err := s.accounts.ListMaintenanceAccountIDs(ctx, source, true)
 		if err != nil {
 			return 0, 0, 0, err
 		}
-		refreshableIDs, err := s.accounts.ListEnabledCredentialRefreshAccountIDs(ctx, providerValue, true)
-		if err != nil {
-			return 0, 0, 0, err
-		}
-		allIDs = append(allIDs, providerIDs...)
-		ids = append(ids, refreshableIDs...)
+		ids = append(ids, eligible...)
+		skipped += n
 	}
-	skipped := max(0, len(allIDs)-len(ids))
-	succeeded, failed, err := s.refreshTokens(ctx, ids, progress)
-	return succeeded, failed, skipped, err
+	succeeded, failed, lateSkipped, err := s.refreshTokens(ctx, ids, progress)
+	return succeeded, failed, skipped + lateSkipped, err
 }
 
-func (s *Service) refreshTokens(ctx context.Context, ids []uint64, progress BatchProgressObserver) (int, int, error) {
-	return s.runAccountBatch(ctx, "credential_refresh", ids, s.refreshPool, progress, func(workCtx context.Context, id uint64) error {
+func (s *Service) refreshTokens(ctx context.Context, ids []uint64, progress BatchProgressObserver) (int, int, int, error) {
+	return s.runMaintenanceBatch(ctx, "credential_refresh", ids, s.refreshPool, progress, func(workCtx context.Context, id uint64) error {
 		value, err := s.accounts.Get(workCtx, id)
 		if err == nil {
 			_, err = s.renewer.ensure(workCtx, value, ensureCredentialOptions{force: true, bypassCooldown: true, retryPermanentOnce: true})
@@ -531,8 +535,7 @@ func (s *Service) refreshTokens(ctx context.Context, ids []uint64, progress Batc
 	})
 }
 
-// BatchRefreshTokens 续期指定账号的凭据；失效账号会强制向上游重试一次，
-// 停用、Provider 不支持或缺少刷新凭据的账号会被跳过。
+// BatchRefreshTokens skips disabled, invalid and non-refreshable accounts.
 func (s *Service) BatchRefreshTokens(ctx context.Context, ids []uint64) (int, int, int, error) {
 	values, err := normalizeBatchIDs(ids)
 	if err != nil {
@@ -547,14 +550,14 @@ func (s *Service) BatchRefreshTokens(ctx context.Context, ids []uint64) (int, in
 		if getErr != nil {
 			return 0, 0, 0, getErr
 		}
-		if !s.providers.SupportsCredentialRefresh(value.Provider) || !value.Enabled || value.EncryptedRefreshToken == "" {
+		if !s.providers.SupportsCredentialRefresh(value.Provider) || !value.Enabled || value.AuthStatus == accountdomain.AuthStatusReauthRequired || value.EncryptedRefreshToken == "" {
 			continue
 		}
 		refreshableIDs = append(refreshableIDs, id)
 	}
 	skipped := len(values) - len(refreshableIDs)
-	succeeded, failed, err := s.refreshTokens(ctx, refreshableIDs, nil)
-	return succeeded, failed, skipped, err
+	succeeded, failed, lateSkipped, err := s.refreshTokens(ctx, refreshableIDs, nil)
+	return succeeded, failed, skipped + lateSkipped, err
 }
 
 // refreshableProviders lists the registered providers whose Definition declares credential refresh.

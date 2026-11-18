@@ -234,9 +234,14 @@ func oneOf(value string, allowed ...string) bool {
 }
 
 func (s *Service) runAccountBatch(ctx context.Context, operation string, ids []uint64, pool *batch.Pool, progress BatchProgressObserver, work func(context.Context, uint64) error) (int, int, error) {
+	ok, failed, skipped, err := s.runMaintenanceBatch(ctx, operation, ids, pool, progress, work)
+	return ok, failed + skipped, err
+}
+
+func (s *Service) runMaintenanceBatch(ctx context.Context, operation string, ids []uint64, pool *batch.Pool, progress BatchProgressObserver, work func(context.Context, uint64) error) (int, int, int, error) {
 	if progress != nil {
 		if err := progress(0, len(ids)); err != nil {
-			return 0, 0, err
+			return 0, 0, 0, err
 		}
 	}
 	var progressMu sync.Mutex
@@ -257,19 +262,25 @@ func (s *Service) runAccountBatch(ctx context.Context, operation string, ids []u
 			}
 		}
 	})
+	skipped := 0
 	for index, result := range results {
+		if errors.Is(result.Err, accountdomain.ErrReauthRequired) {
+			skipped++
+			continue
+		}
 		var panicErr *batch.PanicError
 		if errors.As(result.Err, &panicErr) {
 			s.logger.Error("account_bulk_task_panicked", "operation", operation, "account_id", ids[index], "error", panicErr, "stack", string(panicErr.Stack))
 		}
 	}
+	summary.Failed -= skipped
 	s.logBatchSummary(operation, pool, summary, err)
-	return summary.Succeeded, summary.Failed, errors.Join(err, progressErr)
+	return summary.Succeeded, summary.Failed, skipped, errors.Join(err, progressErr)
 }
 
 func (s *Service) logBatchSummary(operation string, pool *batch.Pool, summary batch.Summary, err error) {
 	snapshot := pool.Snapshot()
-	s.logger.Info("account_bulk_completed", "operation", operation, "total", summary.Total, "submitted", summary.Submitted, "succeeded", summary.Succeeded, "failed", summary.Failed, "panicked", summary.Panicked, "duration_ms", summary.Duration.Milliseconds(), "canceled", summary.Canceled, "pool_limit", snapshot.Limit, "pool_active", snapshot.Active, "pool_queued", snapshot.Queued, "pool_peak", snapshot.Peak, "error", err)
+	s.logger.Info("account_bulk_completed", "operation", operation, "total", summary.Total, "submitted", summary.Submitted, "succeeded", summary.Succeeded, "failed", summary.Failed, "skipped", summary.Completed-summary.Succeeded-summary.Failed, "panicked", summary.Panicked, "duration_ms", summary.Duration.Milliseconds(), "canceled", summary.Canceled, "pool_limit", snapshot.Limit, "pool_active", snapshot.Active, "pool_queued", snapshot.Queued, "pool_peak", snapshot.Peak, "error", err)
 }
 
 func normalizePage(page, pageSize int) (int, int) {

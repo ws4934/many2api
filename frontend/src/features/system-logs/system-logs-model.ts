@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const systemLogSchema = z.object({
   id: z.number().int().positive(), createdAt: z.string(), level: z.string(), message: z.string(),
-  instanceId: z.string(), provider: z.string(), accountId: z.number().int().nonnegative(), requestId: z.string(),
+  instanceId: z.string(), provider: z.string(), accountId: z.number().int().nonnegative(), accountName: z.string(), requestId: z.string(),
   fields: z.record(z.string(), z.unknown()),
 });
 export const systemLogsSchema = z.object({
@@ -23,6 +23,16 @@ export function logQuery(filters: LogFilters, cursor: string): string {
     const value = raw.trim(); if (value) params.set(key, value);
   }
   return params.toString();
+}
+
+export function logAccountLabel(entry: SystemLog): string {
+  return entry.accountId ? [entry.accountName, `#${entry.accountId}`].filter(Boolean).join(" · ") : "—";
+}
+
+export function logProbeNode(entry: SystemLog): string {
+  if (entry.message !== "egress_probe_failed" && entry.message !== "egress_failure_probe_failed") return "";
+  const { node_name: name, node_id: id } = entry.fields;
+  return [typeof name === "string" ? name : "", typeof id === "number" && id > 0 ? `#${id}` : ""].filter(Boolean).join(" · ");
 }
 
 export function logReason(entry: SystemLog): string {

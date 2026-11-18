@@ -256,7 +256,7 @@ func TestProviderRefreshQuotasRouteSyncsWindowProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, body := postRoute(t, server, "/providers/acme_chat/accounts/refresh-quotas", "application/json", nil)
-	if status != http.StatusOK || !strings.Contains(body, "event: complete\n") || !strings.Contains(body, `{"succeeded":1,"failed":0}`) {
+	if status != http.StatusOK || !strings.Contains(body, "event: complete\n") || !strings.Contains(body, `{"succeeded":1,"failed":0,"skipped":0}`) {
 		t.Fatalf("status = %d, body = %s", status, body)
 	}
 	windows, err := repository.GetQuotaWindows(context.Background(), []uint64{created.ID})

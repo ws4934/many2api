@@ -102,19 +102,27 @@ func (r *AccountRepository) UpdateBuildBotFlagSources(ctx context.Context, value
 	return err
 }
 
-func (r *AccountRepository) ListEnabledCredentialRefreshAccountIDs(ctx context.Context, provider account.Provider, refreshableOnly bool) ([]uint64, error) {
-	query := r.db.db.WithContext(ctx).
-		Table("provider_accounts AS account").
-		Select("account.id").
-		Where("account.provider = ? AND account.enabled = ? AND account.auth_status IN ?", provider, true, []account.AuthStatus{account.AuthStatusActive, account.AuthStatusReauthRequired})
-	if refreshableOnly {
-		query = query.
-			Joins("JOIN account_credentials AS credential ON credential.account_id = account.id").
-			Where("credential.encrypted_refresh <> ''")
+func (r *AccountRepository) ListMaintenanceAccountIDs(ctx context.Context, provider account.Provider, requireRefresh bool) ([]uint64, int, error) {
+	// IDs and eligibility come from one snapshot; do not load secrets or enqueue invalid accounts.
+	db := r.db.db.WithContext(ctx).Table("provider_accounts AS a").Where("a.provider = ? AND a.enabled = ?", provider, true)
+	eligible := "a.auth_status = ?"
+	if requireRefresh {
+		eligible += " AND EXISTS (SELECT 1 FROM account_credentials c WHERE c.account_id=a.id AND c.encrypted_refresh <> '')"
 	}
-	var ids []uint64
-	err := query.Order("account.id ASC").Scan(&ids).Error
-	return ids, err
+	var rows []struct {
+		ID       uint64
+		Eligible bool
+	}
+	if err := db.Select("a.id, ("+eligible+") AS eligible", account.AuthStatusActive).Order("a.id ASC").Scan(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if row.Eligible {
+			ids = append(ids, row.ID)
+		}
+	}
+	return ids, len(rows) - len(ids), nil
 }
 
 // GetCredentialMaterial hydrates the encrypted provider data for one account
@@ -133,7 +141,32 @@ func (r *AccountRepository) GetCredentialMaterial(ctx context.Context, accountID
 	return toCredentialMaterialDomain(row, provider), nil
 }
 
+// Do not overwrite a newer import or renew a rejected account. A stale response
+// no longer owns the credential, even if the upstream rotated its cookie.
+func (r *AccountRepository) UpdateMuseCookieJar(ctx context.Context, id uint64, expectedRefresh, encryptedJar string) error {
+	db := r.db.db.WithContext(ctx)
+	accounts := db.Model(&accountModel{}).Select("id").Where("provider = ? AND auth_status = ?", account.ProviderMuse, account.AuthStatusActive)
+	result := db.Model(&accountCredentialModel{}).Where("account_id = ? AND account_id IN (?) AND encrypted_refresh = ?", id, accounts, expectedRefresh).Updates(map[string]any{"encrypted_primary": encryptedJar, "encrypted_refresh": encryptedJar})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		r.notifyInvalidation(ctx, repository.InvalidationEvent{Kind: repository.InvalidationAccountCredentialChanged, Provider: account.ProviderMuse, AccountID: id})
+	}
+	return nil
+}
+
 func (r *AccountRepository) UpdateTokens(ctx context.Context, id uint64, accessToken, refreshToken, state string, expiresAt time.Time, buildBotFlagSource int) (account.Credential, error) {
+	return r.writeTokens(ctx, id, nil, accessToken, refreshToken, state, expiresAt, buildBotFlagSource)
+}
+
+// A completed exchange may race a fresh import or invalidation. Keep its rotation
+// only while the original credential is current; never clear a newer auth rejection.
+func (r *AccountRepository) CommitCredentialRenewal(ctx context.Context, expected account.Credential, accessToken, refreshToken, state string, expiresAt time.Time, buildBotFlagSource int) (account.Credential, error) {
+	return r.writeTokens(ctx, expected.ID, &expected, accessToken, refreshToken, state, expiresAt, buildBotFlagSource)
+}
+
+func (r *AccountRepository) writeTokens(ctx context.Context, id uint64, expected *account.Credential, accessToken, refreshToken, state string, expiresAt time.Time, buildBotFlagSource int) (account.Credential, error) {
 	now := time.Now().UTC()
 	if err := r.db.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var providerRow struct{ Provider string }
@@ -152,10 +185,21 @@ func (r *AccountRepository) UpdateTokens(ctx context.Context, id uint64, accessT
 		if state != "" {
 			updates["encrypted_state"] = state
 		}
-		if err := tx.Model(&accountCredentialModel{}).Where("account_id = ?", id).Updates(updates).Error; err != nil {
-			return err
+		write := tx.Model(&accountCredentialModel{}).Where("account_id = ?", id)
+		if expected != nil {
+			write = write.Where("encrypted_refresh = ?", expected.EncryptedRefreshToken)
 		}
-		return tx.Model(&accountModel{}).Where("id = ?", id).Updates(map[string]any{"auth_status": string(account.AuthStatusActive), "last_error": "", "reauth_marked_at": nil}).Error
+		result := write.Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return repository.ErrConflict
+		}
+		if expected == nil {
+			return tx.Model(&accountModel{}).Where("id = ?", id).Updates(map[string]any{"auth_status": account.AuthStatusActive, "last_error": "", "reauth_marked_at": nil}).Error
+		}
+		return tx.Model(&accountModel{}).Where("id = ? AND auth_status = ?", id, account.AuthStatusActive).Updates(map[string]any{"last_error": "", "reauth_marked_at": nil}).Error
 	}); err != nil {
 		return account.Credential{}, err
 	}

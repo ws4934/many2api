@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -243,8 +244,7 @@ func (a *Adapter) pendingCredential(ctx context.Context, key string) account.Cre
 
 // --- credential refresh (CredentialRefreshAdapter) ---
 
-// RefreshCredential mints a new hatch_vml from the stored jar. The other
-// cookies do not rotate.
+// RefreshCredential renews the session jar, including rotated login cookies.
 func (a *Adapter) RefreshCredential(ctx context.Context, credential account.Credential) (provider.RefreshedCredential, error) {
 	if credential.EncryptedRefreshToken == "" {
 		return provider.RefreshedCredential{}, &provider.CredentialRefreshError{Code: "missing_refresh_token", Permanent: true}
@@ -277,7 +277,10 @@ func (a *Adapter) SyncAccountIdentity(ctx context.Context, credential account.Cr
 	if err != nil {
 		return provider.AccountIdentity{}, err
 	}
-	info, _, _, err := a.renewSession(ctx, credential, a.identityOf(credential), jar)
+	info, updated, _, err := a.renewSession(ctx, credential, a.identityOf(credential), jar)
+	if err == nil {
+		err = a.keepRotation(ctx, credential, jar, updated)
+	}
 	if err != nil {
 		return provider.AccountIdentity{}, err
 	}
@@ -344,6 +347,22 @@ type sessionInfo struct {
 	VMState string `json:"vm_state"`
 }
 
+func (a *Adapter) keepRotation(ctx context.Context, credential account.Credential, before, after []cookie) error {
+	if credential.ID == 0 || slices.Equal(before, after) {
+		return nil
+	}
+	if a.cookieStore == nil {
+		return errors.New("Muse Cookie 存储未配置")
+	}
+	encrypted, err := a.encryptJar(after)
+	if err != nil {
+		return err
+	}
+	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return a.cookieStore.UpdateMuseCookieJar(persist, credential.ID, credential.EncryptedRefreshToken, encrypted)
+}
+
 // renewSession calls /api/session through the account's egress as the
 // account's browser identity. muse.ai answers with a new 48-hour hatch_vml,
 // merged into the jar; expiresAt is when it lapses. A 401 means hatch_sess is
@@ -399,36 +418,42 @@ func (a *Adapter) renewSession(ctx context.Context, credential account.Credentia
 		return sessionInfo{}, nil, time.Time{}, &provider.CredentialRefreshError{Status: response.StatusCode, Code: "muse_session_failed", Message: fmt.Sprintf("muse.ai /api/session 返回 HTTP %d", response.StatusCode)}
 	}
 	var info sessionInfo
-	if json.Unmarshal(body, &info) != nil || info.Status != "assigned" {
-		return sessionInfo{}, nil, time.Time{}, &provider.CredentialRefreshError{Status: response.StatusCode, Code: "muse_session_unassigned", Message: "muse.ai 没有为账号分配工作区，请在官网检查账号"}
+	if json.Unmarshal(body, &info) != nil || info.Status == "" {
+		return sessionInfo{}, nil, time.Time{}, &provider.CredentialRefreshError{Status: response.StatusCode, Code: "muse_session_invalid_response", Message: "muse.ai 未返回有效的会话状态"}
 	}
-	jar = mergeSetCookies(jar, response.Cookies(), time.Now())
+	updated := mergeSetCookies(jar, response.Cookies(), time.Now())
+	if info.Status != "assigned" {
+		unavailable := &provider.CredentialRefreshError{Status: response.StatusCode, Code: "muse_session_unassigned", Message: "muse.ai 暂未分配工作区"}
+		return info, nil, time.Time{}, errors.Join(unavailable, a.keepRotation(ctx, credential, jar, updated))
+	}
+	jar = updated
 	if info.VMID != "" && info.VMState != "RUNNING" && info.VMState != "DISABLED" {
-		a.wakeVM(ctx, lease, newRequest, jar, credential.ID, info)
+		jar = a.wakeVM(ctx, lease, newRequest, jar, credential.ID, info)
 	}
 	return info, jar, jarExpiry(jar), nil
 }
 
 // wakeVM asks muse.ai to start the account's cloud VM, as the web app does on
 // every page load. It is best effort: the next page load wakes it as well.
-func (a *Adapter) wakeVM(ctx context.Context, lease *infraegress.Lease, newRequest func(string, string, io.Reader, []cookie) (*http.Request, error), jar []cookie, accountID uint64, info sessionInfo) {
+func (a *Adapter) wakeVM(ctx context.Context, lease *infraegress.Lease, newRequest func(string, string, io.Reader, []cookie) (*http.Request, error), jar []cookie, accountID uint64, info sessionInfo) []cookie {
 	body, _ := json.Marshal(map[string]any{"vm_id": info.VMID, "retry_count": 0, "connect_attempt_id": uuid.NewString()})
 	request, err := newRequest(http.MethodPost, a.wakeURL, bytes.NewReader(body), jar)
 	if err != nil {
-		return
+		return jar
 	}
 	request.Header.Set("Content-Type", "application/json")
 	response, err := lease.Do(request)
 	if err != nil {
 		a.log().Warn("muse_vm_wake_failed", "account_id", accountID, "vm_state", info.VMState, "error", err)
-		return
+		return jar
 	}
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		a.log().Warn("muse_vm_wake_failed", "account_id", accountID, "vm_state", info.VMState, "status", response.StatusCode)
-		return
+		return jar
 	}
-	a.log().Info("muse_vm_woken", "account_id", accountID, "vm_state", info.VMState)
+	a.log().Info("muse_vm_wake_requested", "account_id", accountID, "vm_state", info.VMState)
+	return mergeSetCookies(jar, response.Cookies(), time.Now())
 }
 
 // mergeSetCookies applies Set-Cookie headers: a cookie without Domain is
@@ -437,7 +462,10 @@ func mergeSetCookies(jar []cookie, updates []*http.Cookie, now time.Time) []cook
 	jar = append([]cookie(nil), jar...)
 	for _, update := range updates {
 		item := cookie{Name: update.Name, Value: update.Value, Path: update.Path, HTTPOnly: update.HttpOnly, Secure: update.Secure, Domain: "muse.ai", HostOnly: true}
-		if domain := strings.TrimPrefix(update.Domain, "."); domain != "" {
+		if domain := strings.ToLower(strings.TrimPrefix(update.Domain, ".")); domain != "" {
+			if domain != "muse.ai" {
+				continue
+			}
 			item.Domain, item.HostOnly = "."+domain, false
 		}
 		if item.Path == "" {

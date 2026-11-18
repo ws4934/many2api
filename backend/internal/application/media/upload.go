@@ -366,17 +366,26 @@ func (s *Service) commitStagedVideo(ctx context.Context, staged stagedVideo, cre
 	return asset, nil
 }
 
-// OpenVideo 读取视频元数据与正文。
-func (s *Service) OpenVideo(ctx context.Context, id string) (mediadomain.Asset, io.ReadCloser, error) {
+// publicVideo excludes temporary inputs from playback and poster requests.
+func (s *Service) publicVideo(ctx context.Context, id string) (mediadomain.Asset, error) {
 	asset, err := s.assets.GetMediaAsset(ctx, strings.TrimSpace(id))
 	if errors.Is(err, repository.ErrNotFound) {
-		return mediadomain.Asset{}, nil, ErrAssetNotFound
+		return mediadomain.Asset{}, ErrAssetNotFound
 	}
 	if err != nil {
-		return mediadomain.Asset{}, nil, err
+		return mediadomain.Asset{}, err
 	}
 	if asset.Kind != "video" || asset.ExpiresAt != nil {
-		return mediadomain.Asset{}, nil, ErrAssetNotFound
+		return mediadomain.Asset{}, ErrAssetNotFound
+	}
+	return asset, nil
+}
+
+// OpenVideo 读取视频元数据与正文。
+func (s *Service) OpenVideo(ctx context.Context, id string) (mediadomain.Asset, io.ReadCloser, error) {
+	asset, err := s.publicVideo(ctx, id)
+	if err != nil {
+		return mediadomain.Asset{}, nil, err
 	}
 	body, err := s.objects.Open(ctx, asset.StorageKey)
 	if errors.Is(err, os.ErrNotExist) {

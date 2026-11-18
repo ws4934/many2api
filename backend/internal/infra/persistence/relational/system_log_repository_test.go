@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chenyme/grok2api/backend/internal/domain/account"
 	"github.com/chenyme/grok2api/backend/internal/domain/systemlog"
 )
 
@@ -27,7 +28,7 @@ func verifySystemLogRepository(t *testing.T, db *Database) {
 	now := time.Now().UTC()
 	values := make([]systemlog.Entry, 0, 15)
 	for i := range 15 {
-		level := "INFO"
+		level := "ERROR"
 		if i%2 == 0 {
 			level = "WARN"
 		}
@@ -96,7 +97,7 @@ func TestSystemLogAppendCapIsAtomicWhenPruningFails(t *testing.T) {
 	ctx := context.Background()
 	values := make([]systemlog.Entry, systemlog.MaxEntries+5)
 	for i := range values {
-		values[i] = systemlog.Entry{CreatedAt: time.Now().UTC(), Level: "INFO", Message: "bounded", Fields: map[string]any{}}
+		values[i] = systemlog.Entry{CreatedAt: time.Now().UTC(), Level: "WARN", Message: "bounded", Fields: map[string]any{}}
 	}
 	if err := repo.AppendSystemLogs(ctx, values); err != nil {
 		t.Fatal(err)
@@ -118,5 +119,54 @@ func TestSystemLogAppendCapIsAtomicWhenPruningFails(t *testing.T) {
 	db.db.Model(&systemLogModel{}).Where("message = ?", "must rollback").Count(&leaked)
 	if leaked != 0 {
 		t.Fatal("failed retention left a committed row")
+	}
+}
+
+func TestSystemLogAccountLabelsAndSeverity(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDatabase(t)
+	repo := NewSystemLogRepository(db)
+	accounts := NewAccountRepository(db)
+	a, _, err := accounts.UpsertByIdentity(ctx, account.Credential{Provider: account.ProviderMuse, Name: "studio_1951", SourceKey: "system-log-fixture", EncryptedAccessToken: "not-for-logs", Enabled: true, AuthStatus: account.AuthStatusActive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	// Rows already on disk before WARN-only logging and name snapshots.
+	for _, level := range []string{"WARN", "INFO"} {
+		if err := db.db.Create(&systemLogModel{Level: level, CreatedAt: now, Message: "old", AccountID: a.ID, FieldsJSON: "{}"}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.AppendSystemLogs(ctx, []systemlog.Entry{
+		{Level: "WARN", CreatedAt: now, AccountID: a.ID, Message: "quota_failure"},
+		{Level: "ERROR", CreatedAt: now, Message: "node_failure"},
+		{Level: "INFO", CreatedAt: now, Message: "probe_success"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var saved int64
+	if err := db.db.Model(&systemLogModel{}).Where("message = ?", "probe_success").Count(&saved).Error; err != nil || saved != 0 {
+		t.Fatalf("saved info=%d: %v", saved, err)
+	}
+	a.Name = "renamed_1951"
+	if _, err = accounts.Update(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		search string
+		names  []string
+	}{
+		{"", []string{"", "studio_1951", "renamed_1951"}}, {"studio_1951", []string{"studio_1951"}}, {"renamed_1951", []string{"renamed_1951"}}, {"renamedX1951", nil},
+	} {
+		rows, more, err := repo.ListSystemLogs(ctx, systemlog.Query{Limit: 10, Search: test.search})
+		if err != nil || more || len(rows) != len(test.names) {
+			t.Fatalf("search=%s rows=%+v more=%v err=%v", test.search, rows, more, err)
+		}
+		for i, row := range rows {
+			if row.AccountName != test.names[i] || row.Level == "INFO" {
+				t.Fatalf("row=%+v", row)
+			}
+		}
 	}
 }

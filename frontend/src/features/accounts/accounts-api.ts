@@ -342,7 +342,7 @@ export function enableWebAccountNSFW(id: string): Promise<{ completed: boolean }
 }
 
 export type AccountBatchResultDTO = { succeeded: number; failed: number };
-export type AccountTokenRefreshResultDTO = AccountBatchResultDTO & { skipped: number };
+export type AccountMaintenanceResultDTO = AccountBatchResultDTO & { skipped: number };
 
 /** 管理端 Grok Build 检测的单账号增量结果（SSE event: item）。 */
 export type BuildDetectItemDTO = {
@@ -401,7 +401,7 @@ export type AccountImportResultDTO = {
 
 export type WebConsoleSyncResultDTO = AccountImportResultDTO & { skipped: number };
 
-type AccountTaskStreamPayload = Partial<BuildConversionResultDTO & AccountTaskProgressDTO & AccountTokenRefreshResultDTO & AccountImportResultDTO & BuildDetectItemDTO> & {
+type AccountTaskStreamPayload = Partial<BuildConversionResultDTO & AccountTaskProgressDTO & AccountMaintenanceResultDTO & AccountImportResultDTO & BuildDetectItemDTO> & {
   code?: string;
   message?: string;
   outcome?: string;
@@ -477,8 +477,8 @@ async function runAccountTask<T>(path: string, body: BodyInit | object | undefin
   return result;
 }
 
-export function refreshAllAccountBilling(onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountBatchResultDTO> {
-  return runAccountTask("/api/admin/v1/accounts/refresh-billing", undefined, ["succeeded", "failed"], { onProgress, signal });
+export function refreshAllAccountBilling(onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountMaintenanceResultDTO> {
+  return runAccountTask("/api/admin/v1/accounts/refresh-billing", undefined, ["succeeded", "failed", "skipped"], { onProgress, signal });
 }
 
 export type DetectBuildAccountsInput =
@@ -490,7 +490,7 @@ export function detectBuildAccounts(input: DetectBuildAccountsInput, handlers: B
   return runAccountTask("/api/admin/v1/accounts/detect", body, ["succeeded", "failed"], { ...handlers, signal, errorCode: "accountDetectFailed" });
 }
 
-export function refreshAllAccountTokens(onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountTokenRefreshResultDTO> {
+export function refreshAllAccountTokens(onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountMaintenanceResultDTO> {
   return runAccountTask("/api/admin/v1/accounts/refresh-tokens", undefined, ["succeeded", "failed", "skipped"], { onProgress, signal });
 }
 
@@ -498,8 +498,8 @@ function providerAccountsPath(provider: AccountProvider, path: string): string {
   return `/api/admin/v1/providers/${encodeURIComponent(provider)}/accounts/${path}`;
 }
 
-export function refreshProviderAccountQuotas(provider: AccountProvider, onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountBatchResultDTO> {
-  return runAccountTask(providerAccountsPath(provider, "refresh-quotas"), undefined, ["succeeded", "failed"], { onProgress, signal });
+export function refreshProviderAccountQuotas(provider: AccountProvider, onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountMaintenanceResultDTO> {
+  return runAccountTask(providerAccountsPath(provider, "refresh-quotas"), undefined, ["succeeded", "failed", "skipped"], { onProgress, signal });
 }
 
 export function convertWebAccountsToBuild(input: BuildConversionInput, onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<BuildConversionResultDTO> {
@@ -576,8 +576,8 @@ export function updateAccountsMaxConcurrent(ids: string[], maxConcurrent: number
   return apiRequest("/api/admin/v1/accounts/batch", { method: "PATCH", body: { ids, maxConcurrent, provider } }, decodeCountResult<{ updated: number }>("updated"));
 }
 
-export function refreshAccountsQuota(ids: string[], provider: AccountProvider): Promise<{ succeeded: number; failed: number }> {
-  return apiRequest("/api/admin/v1/accounts/batch/refresh-quotas", { method: "POST", body: { ids, provider } }, createObjectDecoder("account batch", { succeeded: isNumber, failed: isNumber }));
+export function refreshAccountsQuota(ids: string[], provider: AccountProvider): Promise<AccountMaintenanceResultDTO> {
+  return apiRequest("/api/admin/v1/accounts/batch/refresh-quotas", { method: "POST", body: { ids, provider } }, createObjectDecoder("account batch", { succeeded: isNumber, failed: isNumber, skipped: isNumber }));
 }
 
 export function resetAccountsQuota(ids: string[], provider: AccountProvider): Promise<{ reset: number }> {
@@ -588,7 +588,7 @@ export function resetAllAccountQuota(): Promise<{ reset: number }> {
   return apiRequest("/api/admin/v1/accounts/reset-quota", { method: "POST" }, decodeCountResult<{ reset: number }>("reset"));
 }
 
-export function refreshAccountsTokens(ids: string[], provider: AccountProvider): Promise<AccountTokenRefreshResultDTO> {
+export function refreshAccountsTokens(ids: string[], provider: AccountProvider): Promise<AccountMaintenanceResultDTO> {
   return apiRequest("/api/admin/v1/accounts/batch/refresh-tokens", { method: "POST", body: { ids, provider } }, createObjectDecoder("account token refresh batch", { succeeded: isNumber, failed: isNumber, skipped: isNumber }));
 }
 

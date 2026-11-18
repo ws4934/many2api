@@ -33,12 +33,16 @@ func TestSystemLogsRedactBoundPreserveContextAndStdout(t *testing.T) {
 	if !strings.Contains(stdout.String(), "account_quota_sync_failed") {
 		t.Fatal("original logger lost")
 	}
-	logger.WithGroup("group").Info("grouped", "accessToken", "secret-value", "safe", "retained")
+	logger.Info("egress_probe_succeeded")
+	if len(sink.entries) != 1 || !strings.Contains(stdout.String(), "egress_probe_succeeded") {
+		t.Fatal("info must reach stdout only")
+	}
+	logger.WithGroup("group").Warn("grouped", "accessToken", "secret-value", "safe", "retained")
 	encoded, _ = json.Marshal(sink.entries[1])
 	if strings.Contains(string(encoded), "secret-value") || !strings.Contains(string(encoded), "retained") {
 		t.Fatalf("group: %s", encoded)
 	}
-	logger.Info("large", "large", strings.Repeat("中", 100000), "nested", []any{strings.Repeat("x", 50000)})
+	logger.Error("large", "large", strings.Repeat("中", 100000), "nested", []any{strings.Repeat("x", 50000)})
 	encoded, _ = json.Marshal(sink.entries[2].Fields)
 	if len(encoded) > 8220 {
 		t.Fatalf("fields bytes=%d", len(encoded))

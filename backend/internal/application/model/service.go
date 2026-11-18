@@ -625,6 +625,9 @@ func (s *Service) SyncAccounts(ctx context.Context, accountIDs []uint64) (int, i
 }
 
 func (s *Service) syncAccountCapabilities(ctx context.Context, value account.Credential, adapter provider.ModelCatalogAdapter) ([]string, error) {
+	if value.AuthStatus == account.AuthStatusReauthRequired {
+		return nil, account.ErrReauthRequired
+	}
 	attemptedAt := time.Now().UTC()
 	credential, err := s.account.EnsureCredential(ctx, value, false)
 	if err != nil {

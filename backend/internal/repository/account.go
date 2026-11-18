@@ -102,10 +102,8 @@ type AccountRepository interface {
 	Summarize(ctx context.Context, now time.Time) ([]AccountSummary, error)
 	ListEnabled(ctx context.Context, provider account.Provider) ([]account.Credential, error)
 	ListEnabledAccountIDs(ctx context.Context, provider account.Provider, refreshableOnly bool) ([]uint64, error)
-	// ListEnabledCredentialRefreshAccountIDs includes enabled active and
-	// reauthRequired accounts so an explicit administrator refresh can retry a
-	// previously rejected refresh token once.
-	ListEnabledCredentialRefreshAccountIDs(ctx context.Context, provider account.Provider, refreshableOnly bool) ([]uint64, error)
+	// ListMaintenanceAccountIDs returns eligible enabled accounts and the number skipped.
+	ListMaintenanceAccountIDs(ctx context.Context, provider account.Provider, requireRefresh bool) ([]uint64, int, error)
 	CountProviderAccountsByIDs(ctx context.Context, provider account.Provider, ids []uint64) (int64, error)
 	// CountAvailableAmong counts how many of the given account IDs currently match the
 	// same "available/schedulable" predicate used by Summarize for the provider.
@@ -152,6 +150,7 @@ type AccountRepository interface {
 	DeleteAutoCleanReauthCandidates(ctx context.Context, markedBefore time.Time, includeDisabled bool, candidateIDs []uint64) ([]uint64, error)
 	// UpdateTokens stores rotated tokens; empty refreshToken or state keeps the stored value.
 	UpdateTokens(ctx context.Context, id uint64, accessToken, refreshToken, state string, expiresAt time.Time, buildBotFlagSource int) (account.Credential, error)
+	CommitCredentialRenewal(ctx context.Context, expected account.Credential, accessToken, refreshToken, state string, expiresAt time.Time, buildBotFlagSource int) (account.Credential, error)
 	// The credential refresh schedule queries cover only the given refreshable providers.
 	BackfillCredentialRefreshSchedules(ctx context.Context, providers []account.Provider, now time.Time, limit int) (int, error)
 	ListCriticalCredentialRefreshIDs(ctx context.Context, providers []account.Provider, now, expiresBefore time.Time, limit int) ([]uint64, error)
